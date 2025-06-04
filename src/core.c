@@ -2755,6 +2755,28 @@ HccLocation* hcc_decl_location(HccCU* cu, HccDecl decl) {
 //
 // ===========================================
 
+const char* hcc_address_space_idents[HCC_ADDRESS_SPACE_COUNT] = {
+	[HCC_ADDRESS_SPACE_FUNCTION] = "FUNCTION",
+	[HCC_ADDRESS_SPACE_DG] = "DG",
+	[HCC_ADDRESS_SPACE_BUFFER] = "BUFFER",
+	[HCC_ADDRESS_SPACE_TEXTURE] = "TEXTURE",
+	[HCC_ADDRESS_SPACE_THREAD] = "THREAD",
+	[HCC_ADDRESS_SPACE_BC] = "BC",
+};
+
+const char* hcc_address_space_debug_idents[HCC_ADDRESS_SPACE_COUNT] = {
+	[HCC_ADDRESS_SPACE_AUTO] = "AUTO",
+	[HCC_ADDRESS_SPACE_FUNCTION] = "FUNCTION",
+	[HCC_ADDRESS_SPACE_DG] = "DG",
+	[HCC_ADDRESS_SPACE_BUFFER] = "BUFFER",
+	[HCC_ADDRESS_SPACE_TEXTURE] = "TEXTURE",
+	[HCC_ADDRESS_SPACE_THREAD] = "THREAD",
+	[HCC_ADDRESS_SPACE_BC] = "BC",
+	[HCC_ADDRESS_SPACE_UNIFORM_CONSTANT] = "UNIFORM_CONSTANT",
+	[HCC_ADDRESS_SPACE_INPUT] = "INPUT",
+	[HCC_ADDRESS_SPACE_OUTPUT] = "OUTPUT",
+};
+
 void hcc_data_type_table_init(HccCU* cu, HccCUSetup* setup) {
 	cu->dtt.arrays = hcc_stack_init(HccArrayDataType, HCC_ALLOC_TAG_DATA_TYPE_TABLE_ARRAYS, setup->dtt.arrays_grow_count, setup->dtt.arrays_reserve_cap);
 	cu->dtt.compounds = hcc_stack_init(HccCompoundDataType, HCC_ALLOC_TAG_DATA_TYPE_TABLE_COMPOUNDS, setup->dtt.compounds_grow_count, setup->dtt.compounds_reserve_cap);
@@ -2833,7 +2855,7 @@ HccString hcc_data_type_string(HccCU* cu, HccDataType data_type) {
 			case HCC_DATA_TYPE_POINTER: {
 				HccPointerDataType* d = hcc_pointer_data_type_get(cu, data_type);
 				HccString element_string = hcc_data_type_string(cu, d->element_data_type);
-				uint32_t string_size = snprintf(buf, sizeof(buf), "%.*s*", (int)element_string.size, element_string.data);
+				uint32_t string_size = snprintf(buf, sizeof(buf), "%.*s* %s", (int)element_string.size, element_string.data, hcc_address_space_debug_idents[d->address_space]);
 				string = hcc_string(buf, string_size);
 				break;
 			};
@@ -3411,7 +3433,7 @@ HccDataType hcc_data_type_lower_ast_to_aml(HccCU* cu, HccDataType data_type) {
 			HccPointerDataType* pointer_data_type = hcc_pointer_data_type_get(cu, data_type);
 			HccDataType element_data_type = hcc_data_type_lower_ast_to_aml(cu, pointer_data_type->element_data_type);
 			if (element_data_type != pointer_data_type->element_data_type) {
-				data_type = hcc_pointer_data_type_deduplicate(cu, element_data_type);
+				data_type = hcc_pointer_data_type_deduplicate(cu, element_data_type, pointer_data_type->address_space);
 			}
 			break;
 		};
@@ -3570,16 +3592,6 @@ HccCanCast hcc_data_type_can_cast(HccCU* cu, HccDataType dst_data_type, HccDataT
 
 	if (HCC_DATA_TYPE_IS_AST_BASIC(resolved_dst_data_type) && HCC_DATA_TYPE_IS_AST_BASIC(resolved_src_data_type)) {
 		return HCC_CAN_CAST_YES;
-	}
-
-	if (HCC_DATA_TYPE_IS_POINTER(resolved_dst_data_type)) {
-		if (HCC_DATA_TYPE_IS_POINTER(resolved_src_data_type)) {
-			return HCC_CAN_CAST_YES;
-		}
-
-		if (HCC_DATA_TYPE_IS_ARRAY(resolved_src_data_type)) {
-			return HCC_CAN_CAST_YES;
-		}
 	}
 
 	resolved_dst_data_type = hcc_data_type_lower_ast_to_aml(cu, resolved_dst_data_type);
@@ -4280,9 +4292,13 @@ HccDataType hcc_pointer_data_type_element_data_type(HccPointerDataType* dt) {
 	return dt->element_data_type;
 }
 
-HccDataType hcc_pointer_data_type_deduplicate(HccCU* cu, HccDataType element_data_type) {
+HccAddressSpace hcc_pointer_data_type_address_space(HccPointerDataType* dt) {
+	return dt->address_space;
+}
+
+HccDataType hcc_pointer_data_type_deduplicate(HccCU* cu, HccDataType element_data_type, HccAddressSpace address_space) {
 	element_data_type = hcc_decl_resolve_and_keep_qualifiers(cu, element_data_type);
-	uint64_t key = element_data_type;
+	uint64_t key = ((uint64_t)element_data_type << 32) | address_space;
 	HccHashTableInsert insert = hcc_hash_table_find_insert_idx(cu->dtt.pointers_dedup_hash_table, &key);
 	HccDataTypeDedupEntry* entry = &cu->dtt.pointers_dedup_hash_table[insert.idx];
 	if (!insert.is_new) {
@@ -4296,6 +4312,7 @@ HccDataType hcc_pointer_data_type_deduplicate(HccCU* cu, HccDataType element_dat
 
 	HccPointerDataType* d = hcc_stack_push_thread_safe(cu->dtt.pointers);
 	d->element_data_type = element_data_type;
+	d->address_space = address_space;
 
 	uint32_t pointer_idx = d - cu->dtt.pointers;
 	atomic_store(&entry->id, pointer_idx + 1);
@@ -5458,9 +5475,9 @@ const char* hcc_error_code_lang_fmt_strings[HCC_LANG_COUNT][HCC_ERROR_CODE_COUNT
 		[HCC_ERROR_CODE_PIXEL_SHADER_MUST_RETURN_PIXEL_STATE] = "pixel shader must return a type that was declare with HCC_PIXEL_STATE",
 		[HCC_ERROR_CODE_EXPECTED_IDENTIFIER_FUNCTION_PARAM] = "expected an identifier for a function parameter e.g. uint32_t param_identifier",
 		[HCC_ERROR_CODE_REDEFINITION_IDENTIFIER_FUNCTION_PARAM] = "redefinition of '%.*s' function parameter identifier",
-		[HCC_ERROR_CODE_SHADER_PROTOTYPE_INVALID_VERTEX] = "invalid function prototype for vertex shader, expected to be 'void vertex(HccVertexSV const* const sv, HccVertexSVOut* const sv_out, BC const *const bc, S *const state_out); where BC is your structure of bundled constants and S defined with HCC_RASTERIZER_STATE or void'",
-		[HCC_ERROR_CODE_SHADER_PROTOTYPE_INVALID_PIXEL] = "invalid function prototype for pixel shader, expected to be 'void pixel(HccPixelSV const* const sv, HccPixelSVOut* const sv_out, BC const* const bc, S const* const state, F* const pixel_out); where BC is your structure of bundled constants, S defined with HCC_RASTERIZER_STATE or void' and F defined with HCC_PIXEL_STATE",
-		[HCC_ERROR_CODE_SHADER_PROTOTYPE_INVALID_COMPUTE] = "invalid function prototype for compute shader, expected to be 'void compute(HccComputeSV const* const sv, BC const* const bc); where BC is your structure of bundled constants",
+		[HCC_ERROR_CODE_SHADER_PROTOTYPE_INVALID_VERTEX] = "invalid function prototype for vertex shader, expected to be 'void vertex(HccVertexSV const* const sv, HccVertexSVOut* const sv_out, Bc const* addrsp(BC) const bc, S *const state_out); where Bc is your structure of bundled constants and S defined with HCC_RASTERIZER_STATE or void'",
+		[HCC_ERROR_CODE_SHADER_PROTOTYPE_INVALID_PIXEL] = "invalid function prototype for pixel shader, expected to be 'void pixel(HccPixelSV const* const sv, HccPixelSVOut* const sv_out, Bc const* addrsp(BC) const bc, S const* const state, P* const pixel_out); where Bc is your structure of bundled constants, S defined with HCC_RASTERIZER_STATE or void' and P defined with HCC_PIXEL_STATE",
+		[HCC_ERROR_CODE_SHADER_PROTOTYPE_INVALID_COMPUTE] = "invalid function prototype for compute shader, expected to be 'void compute(HccComputeSV const* const sv, Bc const* addrsp(BC) const bc[, Dg* addrsp(DG) const dg]); where Bc is your structure of bundled constants and where Dg is the structure of Dispatch Group memory. Dg parameter is optional",
 		[HCC_ERROR_CODE_FUNCTION_INVALID_TERMINATOR] = "expected a ',' to declaring more function parameters or a ')' to finish declaring function parameters",
 		[HCC_ERROR_CODE_CANNOT_CALL_SHADER_FUNCTION] = "cannot call shaders like regular functions. they can only be used as entry points",
 		[HCC_ERROR_CODE_CANNOT_CALL_UNIMPLEMENTED_FUNCTION] = "cannot call a function with no implemention",
@@ -5475,15 +5492,16 @@ const char* hcc_error_code_lang_fmt_strings[HCC_LANG_COUNT][HCC_ERROR_CODE_COUNT
 		[HCC_ERROR_CODE_INVALID_DATA_TYPE_FOR_POINTER_DATA_TYPE] = "'%.*s' data type is not supported as a pointer data type. data type cannot be a HCC_RASTERIZER_STATE, HCC_PIXEL_STATE",
 		[HCC_ERROR_CODE_RASTERIZER_STATE_RESOURCE_MUST_BE_NOINTERP] = "'%.*s' data type has a resource type that is not marked as HCC_NOINTERP. you cannot interpolate your resources",
 		[HCC_ERROR_CODE_ONLY_SINGLE_POINTERS_ARE_SUPPORTED] = "only a single pointer is supported",
-		[HCC_ERROR_CODE_POINTERS_NOT_SUPPORTED] = "pointers are not supported outside of entry point and intrinsics function prototypes",
+		[HCC_ERROR_CODE_POINTER_NOT_ALLOW_IN_STRUCT] = "pointer types are not allowed in structs",
+		[HCC_ERROR_CODE_POINTER_NOT_ALLOW_IN_ARRAY] = "pointer types are not allowed in arrays",
+		[HCC_ERROR_CODE_POINTER_MISSING_ADDRSP] = "T* must be declared with addrsp(X), where X is either: FUNCTION, DG, BUFFER, TEXTURE, THREAD, BC",
+		[HCC_ERROR_CODE_POINTER_AUTO_NOT_ALLOWED] = "T* addrsp(AUTO) is only allowed for intrinsic functions",
 		[HCC_ERROR_CODE_LOGICAL_ADDRESSED_VAR_USED_BEFORE_ASSIGNED] = "texture, buffer or pointer has been used before it has been assigned too",
 		[HCC_ERROR_CODE_LOGICAL_ADDRESSED_CONDITIONALLY_ASSIGNED_BEFORE_USE] = "texture, buffer or pointer has been conditionally assigned too before being used. we need to know these value of this variable at compile time.",
 		[HCC_ERROR_CODE_NON_CONST_STATIC_VARIABLE_CANNOT_BE_LOGICALLY_ADDRESSED] = "non-const static variable cannot be a texture, buffer or pointer",
 		[HCC_ERROR_CODE_INCOMPLETE_TYPE_USED_BY_VALUE] = "incomplete type '%.*s' has been used by value",
 		[HCC_ERROR_CODE_STATIC_AND_EXTERN] = "a declaration cannot be both 'static' and 'extern', please pick one",
 		[HCC_ERROR_CODE_THREAD_LOCAL_MUST_BE_GLOBAL] = "'_Thread_local' can only be on global variables",
-		[HCC_ERROR_CODE_DISPATCH_GROUP_MUST_BE_GLOBAL] = "'__hcc_dispatch_group' can only be on global variables",
-		[HCC_ERROR_CODE_DISPATCH_GROUP_CANNOT_HAVE_INITIALIZER] = "'__hcc_dispatch_group' global variables cannot have initializers and must be uninitialized memory",
 		[HCC_ERROR_CODE_STATIC_UNSUPPORTED_ON_SPIRV] = "mutable 'static' variables are unsupported by SPIR-V, used _Thread_local or HCC_DISPATCH_GROUP instead or make your 'static' variable 'const'",
 		[HCC_ERROR_CODE_NOT_ALL_PATHS_RETURN_A_VALUE] = "not all control flow paths return a value, please place a return statement here",
 		[HCC_ERROR_CODE_BUNDLED_CONSTANTS_MAX_SIZE_EXCEEDED] = "the maximum bundled constants size of '%u' has been exceed with '%.*s' with a size of '%u'. you can increase the maximum using the --max-bc-size command line argument",
@@ -5531,7 +5549,6 @@ const char* hcc_error_code_lang_fmt_strings[HCC_LANG_COUNT][HCC_ERROR_CODE_COUNT
 		[HCC_ERROR_CODE_HLSL_PACKING_SIZE_UNDER_4_BYTE] = "HLSL packing rules do not data types under 4 bytes. in future will a proper DXIL backend this error could be worked around",
 		[HCC_ERROR_CODE_HLSL_PACKING_IMPLICIT_PADDING] = "HLSL packing rules do not allow implicit padding before field. in future will a proper DXIL backend this error could be worked around",
 		[HCC_ERROR_CODE_HLSL_PACKING_OVERFLOW_16_BYTE_BOUNDARY] = "HLSL packing rules do not allow overflowing a 16 byte boundary. in future will a proper DXIL backend this error could be worked around",
-		[HCC_ERROR_CODE_DISPATCH_GROUP_ONLY_FOR_COMPUTE] = "HCC_DISPATCH_GROUP can only be used by compute shader stages. here is callstack to the shader entry point:\n%s",
 	},
 };
 

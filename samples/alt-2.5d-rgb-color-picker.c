@@ -54,7 +54,7 @@ HCC_PIXEL_STATE struct ColorPickerPixel {
 	f32x4 color;
 };
 
-HCC_VERTEX void color_picker_vs(HccVertexSV const* const sv, HccVertexSVOut* const sv_out, ColorPickerBC const* const bc, void* const state_out) {
+HCC_VERTEX void color_picker_vs(HccVertexSV const* const sv, HccVertexSVOut* const sv_out, ColorPickerBC const* addrsp(BC) const bc, void* const state_out) {
 	sv_out->position = f32x4((sv->vertex_idx & 1) * 2.f - 1.f, (sv->vertex_idx / 2) * 2.f - 1.f, 0.f, 1.f);
 }
 
@@ -184,7 +184,7 @@ f32x4 distance_cubes(
 	return last_dist_sq;
 }
 
-HCC_PIXEL void color_picker_ps(HccPixelSV const* const sv, HccPixelSVOut* const sv_out, ColorPickerBC const* const bc, void const* const state, ColorPickerPixel* const pixel_out) {
+HCC_PIXEL void color_picker_ps(HccPixelSV const* const sv, HccPixelSVOut* const sv_out, ColorPickerBC const* addrsp(BC) const bc, void const* const state, ColorPickerPixel* const pixel_out) {
 	f32x2 screen_size = f32x2(bc->screen_width, bc->screen_height);
 
 	// a value from -1.f to 1.f

@@ -843,7 +843,7 @@ void generate_texture_intrinsics_file(void) {
 
 	print_texture_functions(
 		"get a readonly address of a texel from 'texture' at 'idx'",
-		"const $tF* addr_ro_$tr_$tf($tR texture, $ti idx)",
+		"const $tF* addrsp(TEXTURE) addr_ro_$tr_$tf($tR texture, $ti idx)",
 		"addr_ro_textureG",
 		"texture, idx",
 		"$tR: addr_ro_$tr_$tf",
@@ -858,7 +858,7 @@ void generate_texture_intrinsics_file(void) {
 
 	print_texture_functions(
 		"get a read/write address of a texel from 'texture' at 'idx'",
-		"$tF* addr_rw_$tw_$tf($tW texture, $ti idx)",
+		"$tF* addrsp(TEXTURE) addr_rw_$tw_$tf($tW texture, $ti idx)",
 		"addr_rw_textureG",
 		"texture, idx",
 		"$tW: addr_rw_$tw_$tf",

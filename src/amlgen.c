@@ -1,3 +1,4 @@
+#include "hcc.h"
 #include "hcc_internal.h"
 
 // ===========================================
@@ -143,7 +144,7 @@ HccAMLOperand hcc_amlgen_generate_instrs(HccWorker* w, HccASTExpr* expr, bool wa
 			//
 			// make a local variable that we can mutate while we initialize the variable's fields
 			HccDataType variable_data_type = hcc_data_type_lower_ast_to_aml(cu, expr->data_type);
-			HccDataType ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, variable_data_type);
+			HccDataType ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, variable_data_type, HCC_ADDRESS_SPACE_FUNCTION);
 			HccAMLOperand variable_operand = hcc_amlgen_instr_add_2(w, expr->location, HCC_AML_OP_PTR_STATIC_ALLOC, hcc_amlgen_value_add(w, ptr_data_type), variable_data_type);
 
 			HccASTExpr* initializer_expr = expr->curly_initializer.first_expr;
@@ -174,6 +175,7 @@ HccAMLOperand hcc_amlgen_generate_instrs(HccWorker* w, HccASTExpr* expr, bool wa
 
 						//
 						// bitcast to the union type
+						w->amlgen.access_chain_address_space = HCC_ADDRESS_SPACE_FUNCTION;
 						dst_elmt_operand = hcc_amlgen_generate_bitcast_union_field(w, initializer_expr->location, data_type, elmt_idx, dst_elmt_operand);
 
 						//
@@ -212,6 +214,7 @@ HccAMLOperand hcc_amlgen_generate_instrs(HccWorker* w, HccASTExpr* expr, bool wa
 					data_type = hcc_data_type_lower_ast_to_aml(cu, data_type);
 				}
 
+				w->amlgen.access_chain_address_space = HCC_ADDRESS_SPACE_FUNCTION;
 				hcc_amlgen_generate_instr_access_chain_end(w, data_type);
 
 				//
@@ -231,7 +234,7 @@ HccAMLOperand hcc_amlgen_generate_instrs(HccWorker* w, HccASTExpr* expr, bool wa
 					HccAMLOperand old_assignee_operand = w->amlgen.assignee_operand;
 					w->amlgen.assignee_operand = value_operand;
 
-					hcc_amlgen_generate_bitfield_store(w, expr, dt, &dt->fields[field_idx], dst_elmt_operand);
+					hcc_amlgen_generate_bitfield_store(w, expr, dt, &dt->fields[field_idx], dst_elmt_operand, HCC_ADDRESS_SPACE_FUNCTION);
 
 					w->amlgen.assignee_operand = old_assignee_operand;
 				} else if (initializer_expr->designated_initializer.is_swizzle) {
@@ -268,8 +271,9 @@ HccAMLOperand hcc_amlgen_generate_instrs(HccWorker* w, HccASTExpr* expr, bool wa
 		};
 		case HCC_AST_EXPR_TYPE_LOCAL_VARIABLE: {
 			HccAMLOperand value_operand = hcc_amlgen_local_variable_operand(w, HCC_DECL_AUX(expr->variable.decl));
+			bool is_const_param = HCC_AML_OPERAND_AUX(value_operand) < w->amlgen.function->params_count;
 			HccASTVariable* variable = &w->amlgen.ast_function->params_and_variables[HCC_DECL_AUX(expr->variable.decl)];
-			return want_variable_ref
+			return want_variable_ref || is_const_param
 				? value_operand
 				: hcc_amlgen_instr_add_2(w, expr->location, HCC_AML_OP_PTR_LOAD, hcc_amlgen_value_add(w, hcc_data_type_lower_ast_to_aml(w->cu, variable->data_type)), value_operand);
 		};
@@ -679,7 +683,7 @@ CALL_END:{}
 
 						if (want_variable_ref) {
 							HccDataType data_type = hcc_aml_operand_data_type(w->cu, w->amlgen.function, return_operand);
-							HccAMLOperand value_operand = hcc_amlgen_value_add(w, hcc_pointer_data_type_deduplicate(w->cu, data_type));
+							HccAMLOperand value_operand = hcc_amlgen_value_add(w, hcc_pointer_data_type_deduplicate(w->cu, data_type, HCC_ADDRESS_SPACE_FUNCTION));
 							HccAMLOperand dst_operand = hcc_amlgen_instr_add_2(w, expr->location, HCC_AML_OP_PTR_STATIC_ALLOC, value_operand, data_type);
 							hcc_amlgen_instr_add_2(w, expr->location, HCC_AML_OP_PTR_STORE, dst_operand, return_operand);
 							return_operand = dst_operand;
@@ -698,11 +702,6 @@ CALL_END:{}
 					expr->unary.op == HCC_AST_UNARY_OP_PRE_INCREMENT || expr->unary.op == HCC_AST_UNARY_OP_PRE_DECREMENT ||
 					expr->unary.op == HCC_AST_UNARY_OP_POST_INCREMENT || expr->unary.op == HCC_AST_UNARY_OP_POST_DECREMENT ||
 					expr->unary.op == HCC_AST_UNARY_OP_ADDRESS_OF
-
-					// TODO:
-					// this is technically incorrect, we need it here as the bundled constants parameter is a pointer but in AML
-					// it doesn't get the extra pointer added to the type like local variables do...
-					|| expr->unary.op == HCC_AST_UNARY_OP_DEREF
 				);
 
 			HccDataType dst_data_type = hcc_data_type_lower_ast_to_aml(w->cu, expr->data_type);
@@ -747,6 +746,9 @@ CALL_END:{}
 						: src_operand;
 				};
 				case HCC_AST_UNARY_OP_DEREF:
+					if (want_variable_ref) {
+						return src_operand;
+					}
 					return hcc_amlgen_instr_add_2(w, expr->location, HCC_AML_OP_PTR_LOAD, hcc_amlgen_value_add(w, dst_data_type), src_operand);
 
 				case HCC_AST_UNARY_OP_ADDRESS_OF:
@@ -1093,6 +1095,9 @@ HccAMLOperand hcc_amlgen_generate_instr_access_chain(HccWorker* w, HccASTExpr* e
 				//
 				// recursive down the left expression tree and generate the access chain
 				result_operand = hcc_amlgen_generate_instr_access_chain(w, left_expr, child_count, child_want_variable_ref);
+				if (expr->binary.op == HCC_AST_BINARY_OP_FIELD_ACCESS_INDIRECT) {
+					w->amlgen.access_chain_address_space = hcc_pointer_data_type_get(w->cu, hcc_aml_operand_data_type(w->cu, w->amlgen.function, result_operand))->address_space;
+				}
 
 				if (expr->binary.op == HCC_AST_BINARY_OP_FIELD_ACCESS_INDIRECT || HCC_DATA_TYPE_IS_UNION(left_data_type) || is_bitfield || is_swizzle) {
 					hcc_amlgen_generate_instr_access_chain_end(w, left_data_type);
@@ -1126,7 +1131,7 @@ HccAMLOperand hcc_amlgen_generate_instr_access_chain(HccWorker* w, HccASTExpr* e
 						HccAMLOperand base_ptr_operand = result_operand;
 						result_operand = 0;
 						if (w->amlgen.assignee_operand) {
-							return hcc_amlgen_generate_bitfield_store(w, expr, dt, field, base_ptr_operand);
+							return hcc_amlgen_generate_bitfield_store(w, expr, dt, field, base_ptr_operand, w->amlgen.access_chain_address_space);
 						} else {
 							result_operand = hcc_amlgen_generate_bitfield_load(w, expr, dt, field, base_ptr_operand);
 						}
@@ -1182,6 +1187,7 @@ HccAMLOperand hcc_amlgen_generate_instr_access_chain(HccWorker* w, HccASTExpr* e
 					// load in pointer if we have are indexing one and start the next access chain
 					if (HCC_DATA_TYPE_IS_RESOURCE(left_data_type)) {
 						result_operand = hcc_amlgen_generate_resource_descriptor_load(w, expr->location, result_operand);
+						w->amlgen.access_chain_address_space = HCC_ADDRESS_SPACE_BUFFER;
 					}
 					result_operand = hcc_amlgen_generate_instr_access_chain_start(w, expr->location, HCC_AML_OP_PTR_ACCESS_CHAIN_IN_BOUNDS, result_operand, count + 1);
 				}
@@ -1194,6 +1200,7 @@ HccAMLOperand hcc_amlgen_generate_instr_access_chain(HccWorker* w, HccASTExpr* e
 	}
 
 	HccAMLOperand variable_ref = hcc_amlgen_generate_instrs(w, expr, true);
+	w->amlgen.access_chain_address_space = hcc_pointer_data_type_get(w->cu, hcc_aml_operand_data_type(w->cu, w->amlgen.function, variable_ref))->address_space;
 	if (count == 0) {
 		return variable_ref;
 	}
@@ -1266,7 +1273,7 @@ void hcc_amlgen_generate_instr_access_chain_end(HccWorker* w, HccDataType dst_da
 	switch (w->amlgen.access_chain_op) {
 		case HCC_AML_OP_PTR_ACCESS_CHAIN:
 		case HCC_AML_OP_PTR_ACCESS_CHAIN_IN_BOUNDS:
-			w->amlgen.function->values[HCC_AML_OPERAND_AUX(w->amlgen.access_chain_operands[0])].data_type = hcc_pointer_data_type_deduplicate(w->cu, dst_data_type);
+			w->amlgen.function->values[HCC_AML_OPERAND_AUX(w->amlgen.access_chain_operands[0])].data_type = hcc_pointer_data_type_deduplicate(w->cu, dst_data_type, w->amlgen.access_chain_address_space);
 			w->amlgen.access_chain_operands = NULL;
 			break;
 		default: HCC_ABORT("unexpected access chain op: %u\n", w->amlgen.access_chain_op);
@@ -1330,7 +1337,7 @@ HccAMLOperand hcc_amlgen_generate_bitfield_load(HccWorker* w, HccASTExpr* expr, 
 	for (uint32_t storage_field_idx = field->storage_field_idx; storage_field_idx < storage_field_end_idx; storage_field_idx += 1) {
 		HccCompoundField* storage_field = &dt->storage_fields[storage_field_idx];
 		HccDataType storage_field_data_type = hcc_data_type_lower_ast_to_aml(w->cu, storage_field->data_type);
-		HccDataType storage_field_ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, storage_field_data_type);
+		HccDataType storage_field_ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, storage_field_data_type, w->amlgen.access_chain_address_space);
 
 		HccBasic storage_field_idx_basic = hcc_basic_from_uint(w->cu, HCC_DATA_TYPE_AML_INTRINSIC_S32, storage_field_idx);
 		HccConstantId storage_field_idx_constant_id = hcc_constant_table_deduplicate_basic(w->cu, HCC_DATA_TYPE_AML_INTRINSIC_S32, &storage_field_idx_basic);
@@ -1409,7 +1416,7 @@ HccAMLOperand hcc_amlgen_generate_bitfield_load(HccWorker* w, HccASTExpr* expr, 
 	return result_operand;
 }
 
-HccAMLOperand hcc_amlgen_generate_bitfield_store(HccWorker* w, HccASTExpr* expr, HccCompoundDataType* dt, HccCompoundField* field, HccAMLOperand base_ptr_operand) {
+HccAMLOperand hcc_amlgen_generate_bitfield_store(HccWorker* w, HccASTExpr* expr, HccCompoundDataType* dt, HccCompoundField* field, HccAMLOperand base_ptr_operand, HccAddressSpace address_space) {
 	HccDataType result_data_type = hcc_data_type_lower_ast_to_aml(w->cu, expr->data_type);
 	HccAMLOperand result_operand = 0;
 	HccDataType field_data_type = hcc_data_type_lower_ast_to_aml(w->cu, field->data_type);
@@ -1422,7 +1429,7 @@ HccAMLOperand hcc_amlgen_generate_bitfield_store(HccWorker* w, HccASTExpr* expr,
 	for (uint32_t storage_field_idx = field->storage_field_idx; storage_field_idx < storage_field_end_idx; storage_field_idx += 1) {
 		HccCompoundField* storage_field = &dt->storage_fields[storage_field_idx];
 		HccDataType storage_field_data_type = hcc_data_type_lower_ast_to_aml(w->cu, storage_field->data_type);
-		HccDataType storage_field_ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, storage_field_data_type);
+		HccDataType storage_field_ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, storage_field_data_type, address_space);
 
 		HccDataType unsigned_storage_field_data_type = storage_field_data_type;
 		if (hcc_basic_type_class(w->cu, storage_field_data_type) == HCC_BASIC_TYPE_CLASS_SINT) {
@@ -1515,7 +1522,7 @@ HccAMLOperand hcc_amlgen_generate_bitcast_union_field(HccWorker* w, HccLocation*
 	HccCompoundDataType* compound_data_type = hcc_compound_data_type_get(w->cu, union_data_type);
 	HccCompoundField* field = &compound_data_type->storage_fields[storage_field_idx];
 	HccDataType field_data_type = hcc_data_type_lower_ast_to_aml(w->cu, field->data_type);
-	HccDataType dst_data_type = hcc_pointer_data_type_deduplicate(w->cu, field_data_type);
+	HccDataType dst_data_type = hcc_pointer_data_type_deduplicate(w->cu, field_data_type, w->amlgen.access_chain_address_space);
 	return hcc_amlgen_instr_add_2(w, location, HCC_AML_OP_BITCAST,
 		hcc_amlgen_value_add(w, dst_data_type),
 		union_ptr_operand);
@@ -1582,7 +1589,7 @@ void hcc_amlgen_generate(HccWorker* w) {
 			HccAMLOperand value_operand = hcc_amlgen_value_add(w, 0); // add a dummy value if parameter was marked as const
 		} else {
 			HccDataType data_type = hcc_data_type_lower_ast_to_aml(w->cu, variable->data_type);
-			HccDataType ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, data_type);
+			HccDataType ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, data_type, HCC_ADDRESS_SPACE_FUNCTION);
 			HccAMLOperand value_operand = hcc_amlgen_value_add(w, ptr_data_type);
 			hcc_amlgen_instr_add_2(w, variable->identifier_location, HCC_AML_OP_PTR_STATIC_ALLOC, value_operand, data_type);
 		}
@@ -1604,7 +1611,7 @@ void hcc_amlgen_generate(HccWorker* w) {
 	for (uint32_t variable_idx = ast_function->params_count; variable_idx < ast_function->variables_count; variable_idx += 1) {
 		HccASTVariable* variable = &ast_function->params_and_variables[variable_idx];
 		HccDataType data_type = hcc_data_type_lower_ast_to_aml(w->cu, variable->data_type);
-		HccDataType ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, data_type);
+		HccDataType ptr_data_type = hcc_pointer_data_type_deduplicate(w->cu, data_type, HCC_ADDRESS_SPACE_FUNCTION);
 		HccAMLOperand value_operand = hcc_amlgen_value_add(w, ptr_data_type);
 		hcc_amlgen_instr_add_2(w, variable->identifier_location, HCC_AML_OP_PTR_STATIC_ALLOC, value_operand, data_type);
 	}

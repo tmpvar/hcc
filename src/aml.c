@@ -1,3 +1,4 @@
+#include "hcc.h"
 #include "hcc_internal.h"
 
 // ===========================================
@@ -642,7 +643,7 @@ HccDataType hcc_aml_operand_data_type(HccCU* cu, const HccAMLFunction* function,
 		};
 		case HCC_DECL_GLOBAL_VARIABLE: {
 			HccASTVariable* variable = hcc_ast_global_variable_get(cu, (HccDecl)operand);
-			return variable->data_type;
+			return hcc_pointer_data_type_deduplicate(cu, variable->data_type, HCC_ADDRESS_SPACE_THREAD);
 		};
 		case HCC_DECL_FUNCTION:
 			return hcc_decl_function_data_type(cu, (HccDecl)operand);

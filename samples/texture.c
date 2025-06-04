@@ -29,7 +29,7 @@ HCC_RASTERIZER_STATE struct TextureRasterizerState {
 HCC_VERTEX void texture_vs(
 	HccVertexSV const* const sv,
 	HccVertexSVOut* const sv_out,
-	TextureBC const* const bc,
+	TextureBC const* addrsp(BC) const bc,
 	TextureRasterizerState* const state_out
 ) {
 	sv_out->position = f32x4((sv->vertex_idx & 1) * 2.f - 1.f, (sv->vertex_idx / 2) * 2.f - 1.f, 0.f, 1.f);
@@ -44,7 +44,7 @@ HCC_PIXEL_STATE struct TexturePixel {
 HCC_PIXEL void texture_ps(
 	HccPixelSV const* const sv,
 	HccPixelSVOut* const sv_out,
-	TextureBC const* const bc,
+	TextureBC const* addrsp(BC) const bc,
 	TextureRasterizerState const* const state,
 	TexturePixel* const pixel_out
 ) {

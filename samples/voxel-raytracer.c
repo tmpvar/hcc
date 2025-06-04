@@ -81,7 +81,7 @@ f32x2x2 voxel_mat2_identity_rotation(float angle) {
 }
 
 HCC_COMPUTE(8, 8, 1)
-void voxel_raytracer_cs(HccComputeSV const* const sv, VoxelRaytracerBC const* const bc) {
+void voxel_raytracer_cs(HccComputeSV const* const sv, VoxelRaytracerBC const* addrsp(BC) const bc) {
 	u32x3 dispatch_idx = sv->dispatch_idx;
 	f32x2 screen_size = f32x2(bc->screen_width, bc->screen_height);
 	f32x2 coord = f32x2(dispatch_idx.x, dispatch_idx.y);

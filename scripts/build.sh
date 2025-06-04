@@ -14,6 +14,8 @@ ln -snf ../libhccintrinsics libhccintrinsics
 cd ..\
 
 clang $FLAGS -o build/hcc src/hcc_main.c && \
+clang -pedantic -D_GNU_SOURCE -Ilibhmaths -Ilibhccintrinsics -Iinterop -lm -std=gnu11 -Werror -Wfloat-conversion -Wextra -lX11 -lvulkan -g -o ./tests/tests ./tests/app/main.c && \
+./tests/tests && \
 build/hcc -O -fi samples/shaders.c -fo samples/shaders.spirv -fomc samples/shaders-metadata.h --enable-unordered-swizzling && \
 clang -pedantic -D_GNU_SOURCE -Ilibhmaths -Ilibhccintrinsics -Iinterop -lm -std=gnu11 -Werror -Wfloat-conversion -Wextra -lX11 -lvulkan -g -o ./samples/samples ./samples/app/main.c && \
 clang -pedantic -D_GNU_SOURCE -Ilibhmaths -Ilibhccintrinsics -Iinterop -lm -std=gnu11 -Werror -Wfloat-conversion -Wextra -lX11 -lvulkan -g -o ./playground/playground ./playground/app/main.c

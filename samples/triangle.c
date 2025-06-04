@@ -31,7 +31,7 @@ HccRoBuffer(TriangleVertex) get_vertices_buffer(TriangleBC bc) {
 HCC_VERTEX void triangle_vs(
 	HccVertexSV const* const sv,
 	HccVertexSVOut* const sv_out,
-	TriangleBC const* const bc,
+	TriangleBC const* addrsp(BC) const bc,
 	TriangleRasterizerState* const state_out
 ) {
 	HccRoBuffer(TriangleVertex) vertices = bc->vertices;
@@ -62,7 +62,7 @@ struct Test {
 HCC_PIXEL void triangle_ps(
 	HccPixelSV const* const sv,
 	HccPixelSVOut* const sv_out,
-	TriangleBC const* const bc,
+	TriangleBC const* addrsp(BC) const bc,
 	TriangleRasterizerState const* const state,
 	TrianglePixel* const pixel_out
 ) {
@@ -103,6 +103,21 @@ HCC_PIXEL void triangle_ps(
 	};
 
 	success &= test.vec.x == 3 && test.vec.y == 1 && test.vec.z == 2 && test.vec.w == 0;
+
+	{
+		uint32_t a = 123;
+		uint32_t b = 456;
+		uint32_t* addrsp(FUNCTION) p;
+		p = (uint32_t)bc->vertices ? &b : &a;
+		success &= *p == 456;
+
+		if ((uint32_t)bc->vertices) {
+			p = &a;
+		} else {
+			p = &b;
+		}
+		success &= *p == 123;
+	}
 
 	hprintf(bc->hprintf_buffer, "pixel_coord: %f, %f and test: %u, %u, %u, %u\n", splat2(sv->pixel_coord), splat4(test.vec));
 

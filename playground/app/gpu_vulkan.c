@@ -59,8 +59,8 @@ struct GpuVk {
 	VkCommandPool         command_pool;
 	VkCommandBuffer       command_buffers[APP_FRAMES_IN_FLIGHT];
 	VkFence               fences[APP_FRAMES_IN_FLIGHT];
-	VkSemaphore           swapchain_image_ready_semaphores[APP_FRAMES_IN_FLIGHT];
-	VkSemaphore           swapchain_present_ready_semaphore;
+	VkSemaphore*          swapchain_image_ready_semaphores;
+	VkSemaphore*          swapchain_present_ready_semaphores;
 	uint32_t              frame_idx;
 
 	VkDescriptorSet       descriptor_sets[APP_FRAMES_IN_FLIGHT];
@@ -207,22 +207,18 @@ bool gpu_vk_recreate_swapchain_and_friends(uint32_t window_width, uint32_t windo
 	}
 
 	{
-		if (gpu.swapchain_image_ready_semaphores[0]) {
-			for_range(idx, 0, APP_FRAMES_IN_FLIGHT) {
-				vkDestroySemaphore(gpu.device, gpu.swapchain_image_ready_semaphores[idx], NULL);
-			}
-			vkDestroySemaphore(gpu.device, gpu.swapchain_present_ready_semaphore, NULL);
-		}
+		gpu.swapchain_image_ready_semaphores = malloc(gpu.swapchain_images_count * sizeof(VkSemaphore));
+		gpu.swapchain_present_ready_semaphores = malloc(gpu.swapchain_images_count * sizeof(VkSemaphore));
 
 		VkSemaphoreCreateInfo create_info = {
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
 			.pNext = NULL,
 			.flags = 0,
 		};
-		for_range(idx, 0, APP_FRAMES_IN_FLIGHT) {
+		for_range(idx, 0, gpu.swapchain_images_count) {
 			APP_VK_ASSERT(vkCreateSemaphore(gpu.device, &create_info, NULL, &gpu.swapchain_image_ready_semaphores[idx]));
+			APP_VK_ASSERT(vkCreateSemaphore(gpu.device, &create_info, NULL, &gpu.swapchain_present_ready_semaphores[idx]));
 		}
-		APP_VK_ASSERT(vkCreateSemaphore(gpu.device, &create_info, NULL, &gpu.swapchain_present_ready_semaphore));
 	}
 
 	return true;
@@ -413,9 +409,11 @@ void gpu_init(DmWindow window, uint32_t window_width, uint32_t window_height) {
 			.descriptorBindingPartiallyBound = VK_TRUE,
 			.scalarBlockLayout = VK_TRUE,
 		};
-		VkPhysicalDeviceVulkan12Features features_1_1 = {
+		VkPhysicalDeviceVulkan11Features features_1_1 = {
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
 			.pNext = &features_1_2,
+			.variablePointers = VK_TRUE,
+			.variablePointersStorageBuffer = VK_TRUE,
 		};
 		VkPhysicalDeviceFeatures2 features = {
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
@@ -732,6 +730,7 @@ void gpu_render_frame(void* bc, uint32_t window_width, uint32_t window_height) {
 	}
 
 	uint32_t active_frame_idx = gpu.frame_idx % APP_FRAMES_IN_FLIGHT;
+	uint32_t swapchain_semaphore_idx = gpu.frame_idx % gpu.swapchain_images_count;
 
 	//
 	// wait for two frames ago to be finished on the GPU so we can start using it's stuff!
@@ -740,7 +739,7 @@ void gpu_render_frame(void* bc, uint32_t window_width, uint32_t window_height) {
 
 	uint32_t swapchain_image_idx;
 	while (1) {
-		vk_result = vkAcquireNextImageKHR(gpu.device, gpu.swapchain, UINT64_MAX, gpu.swapchain_image_ready_semaphores[active_frame_idx], VK_NULL_HANDLE, &swapchain_image_idx);
+		vk_result = vkAcquireNextImageKHR(gpu.device, gpu.swapchain, UINT64_MAX, gpu.swapchain_image_ready_semaphores[swapchain_semaphore_idx], VK_NULL_HANDLE, &swapchain_image_idx);
 		bool yes = false;
 		switch (vk_result) {
 			case VK_ERROR_OUT_OF_DATE_KHR:
@@ -990,7 +989,7 @@ void gpu_render_frame(void* bc, uint32_t window_width, uint32_t window_height) {
 		VkSemaphoreSubmitInfo wait_semaphore_info = {
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.pNext = NULL,
-			.semaphore = gpu.swapchain_image_ready_semaphores[active_frame_idx],
+			.semaphore = gpu.swapchain_image_ready_semaphores[swapchain_semaphore_idx],
 			.value = 0,
 			.stageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
 			.deviceIndex = 0,
@@ -999,7 +998,7 @@ void gpu_render_frame(void* bc, uint32_t window_width, uint32_t window_height) {
 		VkSemaphoreSubmitInfo signal_semaphore_info = {
 			.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.pNext = NULL,
-			.semaphore = gpu.swapchain_present_ready_semaphore,
+			.semaphore = gpu.swapchain_present_ready_semaphores[swapchain_semaphore_idx],
 			.value = 0,
 			.stageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
 			.deviceIndex = 0,
@@ -1032,7 +1031,7 @@ void gpu_render_frame(void* bc, uint32_t window_width, uint32_t window_height) {
 			.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 			.pNext = NULL,
 			.waitSemaphoreCount = 1,
-			.pWaitSemaphores = &gpu.swapchain_present_ready_semaphore,
+			.pWaitSemaphores = &gpu.swapchain_present_ready_semaphores[swapchain_semaphore_idx],
 			.swapchainCount = 1,
 			.pSwapchains = &gpu.swapchain,
 			.pImageIndices = &swapchain_image_idx,

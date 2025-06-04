@@ -1,4 +1,5 @@
 
+#include "hcc.h"
 #include "hcc_internal.h"
 void hcc_spirvlink_init(HccWorker* w, HccCompilerSetup* setup) {
 	w->spirvlink.words = hcc_stack_init(HccSPIRVWord, HCC_ALLOC_TAG_SPIRVLINK_WORDS, setup->backendlink.binary_grow_size / sizeof(HccSPIRVWord), setup->backendlink.binary_reserve_size / sizeof(HccSPIRVWord));
@@ -145,6 +146,12 @@ void hcc_spirvlink_link(HccWorker* w) {
 	operands = hcc_spirvlink_add_instr(w, HCC_SPIRV_OP_CAPABILITY, 1);
 	operands[0] = HCC_SPIRV_CAPABILITY_STORAGE_IMAGE_EXTENDED_FORMATS;
 
+	operands = hcc_spirvlink_add_instr(w, HCC_SPIRV_OP_CAPABILITY, 1);
+	operands[0] = HCC_SPIRV_CAPABILITY_VARIABLE_POINTERS_STORAGE_BUFFER;
+
+	operands = hcc_spirvlink_add_instr(w, HCC_SPIRV_OP_CAPABILITY, 1);
+	operands[0] = HCC_SPIRV_CAPABILITY_VARIABLE_POINTERS;
+
 	if (hcc_options_get_bool(cu->options, HCC_OPTION_KEY_INT8_ENABLED)) {
 		operands = hcc_spirvlink_add_instr(w, HCC_SPIRV_OP_CAPABILITY, 1);
 		operands[0] = HCC_SPIRV_CAPABILITY_INT8;
@@ -271,11 +278,11 @@ void hcc_spirvlink_link(HccWorker* w) {
 		HCC_COPY_ELMT_MANY(words, cu->spirv.name_words, hcc_stack_count(cu->spirv.name_words));
 	}
 
-	HccSPIRVId variable_input_f32x4_type_id = hcc_spirv_type_deduplicate(w->cu, HCC_SPIRV_STORAGE_CLASS_INPUT, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_CONST(HCC_DATA_TYPE_AML_INTRINSIC_F32X4)));
-	HccSPIRVId variable_input_u32x3_type_id = hcc_spirv_type_deduplicate(w->cu, HCC_SPIRV_STORAGE_CLASS_INPUT, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_CONST(HCC_DATA_TYPE_AML_INTRINSIC_U32X3)));
-	HccSPIRVId variable_input_u32_type_id = hcc_spirv_type_deduplicate(w->cu, HCC_SPIRV_STORAGE_CLASS_INPUT, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_CONST(HCC_DATA_TYPE_AML_INTRINSIC_U32)));
-	HccSPIRVId variable_output_f32x4_type_id = hcc_spirv_type_deduplicate(w->cu, HCC_SPIRV_STORAGE_CLASS_OUTPUT, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_AML_INTRINSIC_F32X4));
-	HccSPIRVId variable_output_f32_type_id = hcc_spirv_type_deduplicate(w->cu, HCC_SPIRV_STORAGE_CLASS_OUTPUT, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_AML_INTRINSIC_F32));
+	HccSPIRVId variable_input_f32x4_type_id = hcc_spirv_type_deduplicate(w->cu, false, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_CONST(HCC_DATA_TYPE_AML_INTRINSIC_F32X4), HCC_ADDRESS_SPACE_INPUT));
+	HccSPIRVId variable_input_u32x3_type_id = hcc_spirv_type_deduplicate(w->cu, false, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_CONST(HCC_DATA_TYPE_AML_INTRINSIC_U32X3), HCC_ADDRESS_SPACE_INPUT));
+	HccSPIRVId variable_input_u32_type_id = hcc_spirv_type_deduplicate(w->cu, false, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_CONST(HCC_DATA_TYPE_AML_INTRINSIC_U32), HCC_ADDRESS_SPACE_INPUT));
+	HccSPIRVId variable_output_f32x4_type_id = hcc_spirv_type_deduplicate(w->cu, false, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_AML_INTRINSIC_F32X4, HCC_ADDRESS_SPACE_OUTPUT));
+	HccSPIRVId variable_output_f32_type_id = hcc_spirv_type_deduplicate(w->cu, false, hcc_pointer_data_type_deduplicate(cu, HCC_DATA_TYPE_AML_INTRINSIC_F32, HCC_ADDRESS_SPACE_OUTPUT));
 
 	{
 		operands = hcc_spirvlink_add_instr(w, HCC_SPIRV_OP_DECORATE, 3);
@@ -327,12 +334,6 @@ void hcc_spirvlink_link(HccWorker* w) {
 		operands[0] = HCC_SPIRV_ID_VARIABLE_INPUT_SUBGROUP_LOCAL_INVOCATION_ID;
 		operands[1] = HCC_SPIRV_DECORATION_BUILTIN;
 		operands[2] = HCC_SPIRV_BUILTIN_SUBGROUP_LOCAL_INVOCATION_ID;
-
-		for (uint32_t idx = 0; idx < hcc_stack_count(cu->spirv.decorate_blocks); idx += 1) {
-			operands = hcc_spirvlink_add_instr(w, HCC_SPIRV_OP_DECORATE, 2);
-			operands[0] = cu->spirv.decorate_blocks[idx];
-			operands[1] = HCC_SPIRV_DECORATION_BLOCK;
-		}
 	}
 
 	HccSPIRVWord* words = hcc_spirvlink_add_word_many(w, hcc_stack_count(cu->spirv.decorate_words));

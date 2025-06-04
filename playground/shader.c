@@ -15,7 +15,7 @@ HCC_RASTERIZER_STATE struct RasterizerState {
 HCC_VERTEX void vertex(
 	HccVertexSV const* const sv,
 	HccVertexSVOut* const sv_out,
-	ShaderBC const* const bc,
+	ShaderBC const* addrsp(BC) const bc,
 	RasterizerState* const state_out
 ) {
 	f32x2 unorm = f32x2(sv->vertex_idx & 1, sv->vertex_idx / 2);
@@ -28,7 +28,7 @@ HCC_VERTEX void vertex(
 HCC_PIXEL void pixel(
 	HccPixelSV const* const sv,
 	HccPixelSVOut* const sv_out,
-	ShaderBC const* const bc,
+	ShaderBC const* addrsp(BC) const bc,
 	RasterizerState const* const state,
 	Pixel* const pixel_out
 ) {

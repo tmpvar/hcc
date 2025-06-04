@@ -56,7 +56,7 @@ HCC_RASTERIZER_STATE struct SDF2dRasterizerState {
 HCC_VERTEX void sdf2d_vs(
 	HccVertexSV const* const sv,
 	HccVertexSVOut* const sv_out,
-	SDF2dBC const* const bc,
+	SDF2dBC const* addrsp(BC) const bc,
 	SDF2dRasterizerState* const state_out
 ) {
 	sv_out->position = f32x4((sv->vertex_idx & 1) * 2.f - 1.f, (sv->vertex_idx / 2) * 2.f - 1.f, 0.f, 1.f);
@@ -71,7 +71,7 @@ HCC_PIXEL_STATE struct SDF2dPixel {
 HCC_PIXEL void sdf2d_ps(
 	HccPixelSV const* const sv,
 	HccPixelSVOut* const sv_out,
-	SDF2dBC const* const bc,
+	SDF2dBC const* addrsp(BC) const bc,
 	SDF2dRasterizerState const* const state,
 	SDF2dPixel* const pixel_out
 ) {

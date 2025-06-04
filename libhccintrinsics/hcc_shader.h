@@ -107,7 +107,7 @@
 #define HCC_NOINTERP __hcc_nointerp
 #define HCC_PIXEL_STATE __hcc_pixel_state
 #define HCC_INTERP __hcc_interp
-#define HCC_DISPATCH_GROUP __hcc_dispatch_group
+#define addrsp(x) addrsp(x)
 #else // !__HCC_GPU__
 #define HCC_VERTEX
 #define HCC_PIXEL
@@ -118,7 +118,7 @@
 #define HCC_NOINTERP
 #define HCC_PIXEL_STATE
 #define HCC_INTERP
-#define HCC_DISPATCH_GROUP static
+#define addrsp(x)
 #endif // !__HCC_GPU__
 
 // ===========================================

@@ -4,6 +4,8 @@ build
 *.ilk
 *.pdb
 .vs
+tests/*.spirv
+tests/tests
 samples/samples
 playground/playground
 segfault_log.txt

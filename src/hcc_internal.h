@@ -990,6 +990,7 @@ struct HccBufferDataType {
 typedef struct HccPointerDataType HccPointerDataType;
 struct HccPointerDataType {
 	HccDataType element_data_type;
+	HccAddressSpace address_space;
 };
 
 typedef struct HccFunctionDataType HccFunctionDataType;
@@ -1002,9 +1003,8 @@ struct HccFunctionDataType {
 typedef uint16_t HccCompoundDataTypeFlags;
 enum HccCompoundDataTypeFlags {
 	HCC_COMPOUND_DATA_TYPE_FLAGS_IS_UNION =     0x1,
-	HCC_COMPOUND_DATA_TYPE_FLAGS_HAS_POINTER =  0x2,
-	HCC_COMPOUND_DATA_TYPE_FLAGS_HAS_UNION =    0x4,
-	HCC_COMPOUND_DATA_TYPE_FLAGS_HAS_RESOURCE = 0x8,
+	HCC_COMPOUND_DATA_TYPE_FLAGS_HAS_UNION =    0x2,
+	HCC_COMPOUND_DATA_TYPE_FLAGS_HAS_RESOURCE = 0x4,
 };
 
 typedef uint8_t HccCompoundDataTypeKind;
@@ -1106,6 +1106,9 @@ struct HccDataTypeTable {
 	HccHashTable(HccDataTypeDedupEntry) buffers_dedup_hash_table;
 };
 
+extern const char* hcc_address_space_idents[HCC_ADDRESS_SPACE_COUNT];
+extern const char* hcc_address_space_debug_idents[HCC_ADDRESS_SPACE_COUNT];
+
 void hcc_data_type_table_init(HccCU* cu, HccCUSetup* setup);
 void hcc_data_type_table_deinit(HccCU* cu);
 
@@ -1206,6 +1209,7 @@ struct HccASTFunction {
 	uint32_t            compute_dispatch_group_size_x;
 	uint32_t            compute_dispatch_group_size_y;
 	uint32_t            compute_dispatch_group_size_z;
+	HccDataType         compute_dispatch_group_data_type;
 };
 
 enum {
@@ -1226,6 +1230,7 @@ enum {
 enum {
 	HCC_COMPUTE_SHADER_PARAM_COMPUTE_SV,
 	HCC_COMPUTE_SHADER_PARAM_BC,
+	HCC_COMPUTE_SHADER_PARAM_DG,
 };
 
 enum {
@@ -2146,7 +2151,6 @@ enum {
 	HCC_ASTGEN_SPECIFIER_STATIC,
 	HCC_ASTGEN_SPECIFIER_EXTERN,
 	HCC_ASTGEN_SPECIFIER_THREAD_LOCAL,
-	HCC_ASTGEN_SPECIFIER_DISPATCH_GROUP,
 	HCC_ASTGEN_SPECIFIER_INLINE,
 	HCC_ASTGEN_SPECIFIER_NO_RETURN,
 
@@ -2167,7 +2171,6 @@ enum {
 	HCC_ASTGEN_SPECIFIER_FLAGS_STATIC =              1 << HCC_ASTGEN_SPECIFIER_STATIC,
 	HCC_ASTGEN_SPECIFIER_FLAGS_EXTERN =              1 << HCC_ASTGEN_SPECIFIER_EXTERN,
 	HCC_ASTGEN_SPECIFIER_FLAGS_THREAD_LOCAL =        1 << HCC_ASTGEN_SPECIFIER_THREAD_LOCAL,
-	HCC_ASTGEN_SPECIFIER_FLAGS_DISPATCH_GROUP =      1 << HCC_ASTGEN_SPECIFIER_DISPATCH_GROUP,
 	HCC_ASTGEN_SPECIFIER_FLAGS_INLINE =              1 << HCC_ASTGEN_SPECIFIER_INLINE,
 	HCC_ASTGEN_SPECIFIER_FLAGS_NO_RETURN =           1 << HCC_ASTGEN_SPECIFIER_NO_RETURN,
 
@@ -2185,8 +2188,7 @@ enum {
 	HCC_ASTGEN_SPECIFIER_FLAGS_ALL_VARIABLE_SPECIFIERS =
 		HCC_ASTGEN_SPECIFIER_FLAGS_STATIC         |
 		HCC_ASTGEN_SPECIFIER_FLAGS_EXTERN         |
-		HCC_ASTGEN_SPECIFIER_FLAGS_THREAD_LOCAL   |
-		HCC_ASTGEN_SPECIFIER_FLAGS_DISPATCH_GROUP ,
+		HCC_ASTGEN_SPECIFIER_FLAGS_THREAD_LOCAL   ,
 	HCC_ASTGEN_SPECIFIER_FLAGS_ALL_FUNCTION_SPECIFIERS =
 		HCC_ASTGEN_SPECIFIER_FLAGS_STATIC    |
 		HCC_ASTGEN_SPECIFIER_FLAGS_EXTERN    |
@@ -2264,14 +2266,14 @@ struct HccASTGen {
 
 	HccASTExpr*     stmt_block;
 	HccASTFunction* function;
+	HccAddressSpace expr_address_space;
 
 	HccASTGenSwitchState switch_state;
 	bool is_in_loop;
-	bool allow_pointer;
 	uint32_t compute_dispatch_group_size_x;
 	uint32_t compute_dispatch_group_size_y;
 	uint32_t compute_dispatch_group_size_z;
-	HccLocation* prev_pointer_data_type_location;
+	bool is_intrinsic;
 
 	HccStack(HccCompoundField) compound_fields;
 	HccStack(HccEnumValue)     enum_values;
@@ -2571,6 +2573,7 @@ struct HccAMLGen {
 	HccLocation*            last_location;
 	bool                    is_inside_basic_block;
 	HccAMLOperand           assignee_operand;
+	HccAddressSpace         access_chain_address_space;
 };
 
 void hcc_amlgen_init(HccWorker* w, HccCompilerSetup* setup);
@@ -2601,7 +2604,7 @@ void hcc_amlgen_generate_instr_access_chain_set_next_operand(HccWorker* w, HccAM
 void hcc_amlgen_generate_instr_access_chain_end(HccWorker* w, HccDataType dst_data_type);
 HccAMLOperand hcc_amlgen_generate_swizzle_store(HccWorker* w, HccLocation* location, HccSwizzle swizzle, HccDataType dst_data_type, HccAMLOperand dst_ptr_operand);
 HccAMLOperand hcc_amlgen_generate_bitfield_load(HccWorker* w, HccASTExpr* expr, HccCompoundDataType* dt, HccCompoundField* field, HccAMLOperand base_ptr_operand);
-HccAMLOperand hcc_amlgen_generate_bitfield_store(HccWorker* w, HccASTExpr* expr, HccCompoundDataType* dt, HccCompoundField* field, HccAMLOperand base_ptr_operand);
+HccAMLOperand hcc_amlgen_generate_bitfield_store(HccWorker* w, HccASTExpr* expr, HccCompoundDataType* dt, HccCompoundField* field, HccAMLOperand base_ptr_operand, HccAddressSpace address_space);
 HccAMLOperand hcc_amlgen_generate_bitcast_union_field(HccWorker* w, HccLocation* location, HccDataType union_data_type, uint32_t storage_field_idx, HccAMLOperand union_ptr_operand);
 HccAMLOperand hcc_amlgen_generate_resource_descriptor_load(HccWorker* w, HccLocation* location, HccAMLOperand operand);
 HccAMLOperand hcc_amlgen_generate_resource_descriptor_addr(HccWorker* w, HccLocation* location, HccAMLOperand operand);
@@ -2849,6 +2852,7 @@ enum {
 	HCC_SPIRV_OP_GROUP_NON_UNIFORM_BITWISE_XOR = 361,
 	HCC_SPIRV_OP_GROUP_NON_UNIFORM_QUAD_BROADCAST = 365,
 	HCC_SPIRV_OP_GROUP_NON_UNIFORM_QUAD_SWAP = 366,
+	HCC_SPIRV_OP_COPY_LOGICAL = 400,
 
 
 	HCC_SPIRV_OP_DEMOTE_TO_HELPER_INVOCATION = 5380,
@@ -2959,6 +2963,8 @@ enum {
 	HCC_SPIRV_CAPABILITY_GROUP_NON_UNIFORM_ARITHMETIC = 63,
 	HCC_SPIRV_CAPABILITY_GROUP_NON_UNIFORM_SHUFFLE = 65,
 	HCC_SPIRV_CAPABILITY_GROUP_NON_UNIFORM_QUAD = 68,
+	HCC_SPIRV_CAPABILITY_VARIABLE_POINTERS_STORAGE_BUFFER = 4441,
+	HCC_SPIRV_CAPABILITY_VARIABLE_POINTERS = 4442,
 	HCC_SPIRV_CAPABILITY_INT64_IMAGE_EXT = 5016,
 	HCC_SPIRV_CAPABILITY_VULKAN_MEMORY_MODEL = 5345,
 	HCC_SPIRV_CAPABILITY_VULKAN_MEMORY_MODEL_DEVICE_SCOPE = 5346,
@@ -3187,8 +3193,8 @@ struct HccSPIRVFunction {
 
 typedef struct HccSPIRVTypeKey HccSPIRVTypeKey;
 struct HccSPIRVTypeKey {
-	HccSPIRVStorageClass storage_class;
-	HccDataType          data_type;
+	bool        has_explicit_layout;
+	HccDataType data_type;
 };
 
 typedef struct HccSPIRVTypeEntry HccSPIRVTypeEntry;
@@ -3232,8 +3238,9 @@ struct HccSPIRVConstantEntry {
 typedef struct HccSPIRVUniqueTypeKey HccSPIRVUniqueTypeKey;
 struct HccSPIRVUniqueTypeKey {
 	HccSPIRVOperand* operands;
-	uint32_t         operands_count;
+	uint16_t         operands_count;
 	HccSPIRVOp       op;
+	bool             has_explicit_layout;
 };
 
 typedef struct HccSPIRVUniqueTypeEntry HccSPIRVUniqueTypeEntry;
@@ -3267,7 +3274,6 @@ struct HccSPIRV {
 	HccStack(HccSPIRVWord)                       global_variable_words;
 	HccStack(HccSPIRVWord)                       name_words;
 	HccStack(HccSPIRVWord)                       decorate_words;
-	HccStack(HccSPIRVId)                         decorate_blocks;
 	HccSPIRVId                                   resource_descriptors_max_constant_spirv_id;
 	HccSPIRVId                                   scope_device_spirv_id;
 	HccSPIRVId                                   scope_workgroup_spirv_id;
@@ -3296,13 +3302,15 @@ struct HccSPIRVDescriptorBindingInfo {
 extern uint32_t hcc_spirv_image_format[HCC_TEXTURE_FORMAT_COUNT];
 
 void hcc_spirv_init(HccCU* cu, HccCUSetup* setup);
+bool hcc_spirv_data_type_has_explicit_layout(HccDataType data_type);
+bool hcc_spirv_address_space_has_explicit_layout(HccDataType data_type, HccAddressSpace address_space);
+HccSPIRVStorageClass hcc_spirv_storage_class(HccAddressSpace address_space);
 HccSPIRVId hcc_spirv_next_id(HccCU* cu);
 HccSPIRVId hcc_spirv_next_id_many(HccCU* cu, uint32_t amount);
-HccSPIRVId hcc_spirv_type_deduplicate(HccCU* cu, HccSPIRVStorageClass storage_class, HccDataType data_type);
+HccSPIRVId hcc_spirv_type_deduplicate(HccCU* cu, bool has_explicit_layout, HccDataType data_type);
 HccSPIRVId hcc_spirv_decl_deduplicate(HccCU* cu, HccDecl decl);
 void hcc_spirv_resource_descriptor_binding_deduplicate(HccCU* cu, HccDataType data_type, HccSPIRVDescriptorBindingInfo* info_out);
 HccSPIRVId hcc_spirv_constant_deduplicate(HccCU* cu, HccConstantId constant_id);
-HccSPIRVStorageClass hcc_spirv_storage_class_from_aml_operand(HccCU* cu, const HccAMLFunction* aml_function, HccAMLOperand aml_operand);
 uint32_t hcc_spirv_string_words_count(uint32_t string_size);
 void hcc_spirv_encode_string(HccSPIRVWord* dst_words, HccString string);
 HccSPIRVOperand* hcc_spirv_add_global_variable(HccCU* cu, uint32_t operands_count);
@@ -3338,6 +3346,7 @@ struct HccSPIRVGen {
 	HccSPIRVId            rasterizer_state_variable_base_spirv_id;
 	HccSPIRVId            pixel_state_variable_base_spirv_id;
 	HccSPIRVId            bc_spirv_id;
+	HccSPIRVId            dg_spirv_id;
 
 	uint16_t              function_unique_globals_count;
 	HccSPIRVId            function_unique_globals[HCC_FUNCTION_UNIQUE_GLOBALS_CAP];

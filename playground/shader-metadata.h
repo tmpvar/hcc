@@ -14,6 +14,11 @@ enum HccResourceStruct {
 	HccResourceStruct_INVALID,
 };
 
+const char* hcc_shader_names[] = {
+	"vertex",
+	"pixel",
+};
+
 HccShaderInfo hcc_shader_infos[] = {
 	{
 		/* .name = */                   "vertex",
