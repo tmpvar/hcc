@@ -2681,6 +2681,8 @@ enum {
 	HCC_SPIRV_OP_NO_OP = 0,
 	HCC_SPIRV_OP_NAME = 5,
 	HCC_SPIRV_OP_MEMBER_NAME = 6,
+	HCC_SPIRV_OP_STRING = 7,
+	HCC_SPIRV_OP_LINE = 8,
 	HCC_SPIRV_OP_EXTENSION = 10,
 	HCC_SPIRV_OP_EXT_INST_IMPORT = 11,
 	HCC_SPIRV_OP_EXT_INST = 12,
@@ -3189,6 +3191,8 @@ struct HccSPIRVFunction {
 	uint32_t      words_cap;
 	HccSPIRVId*   global_variable_ids;
 	uint32_t      global_variables_count;
+	uint32_t      prev_line;
+	uint32_t      prev_column;
 };
 
 typedef struct HccSPIRVTypeKey HccSPIRVTypeKey;
@@ -3235,6 +3239,12 @@ struct HccSPIRVConstantEntry {
 	HccAtomic(HccSPIRVId) spirv_id;
 };
 
+typedef struct HccSPIRVStringEntry HccSPIRVStringEntry;
+struct HccSPIRVStringEntry {
+	HccConstantId         constant_id;
+	HccAtomic(HccSPIRVId) spirv_id;
+};
+
 typedef struct HccSPIRVUniqueTypeKey HccSPIRVUniqueTypeKey;
 struct HccSPIRVUniqueTypeKey {
 	HccSPIRVOperand* operands;
@@ -3267,6 +3277,8 @@ struct HccSPIRV {
 	HccHashTable(HccSPIRVUniqueTypeEntry)        unique_type_table;
 	HccHashTable(HccSPIRVDescriptorBindingEntry) descriptor_binding_table;
 	HccHashTable(HccSPIRVConstantEntry)          constant_table;
+	HccHashTable(HccSPIRVStringEntry)            string_table;
+	HccStack(HccSPIRVTypeOrConstant)             strings;
 	HccStack(HccSPIRVTypeOrConstant)             types_and_constants;
 	HccStack(HccSPIRVId)                         type_elmt_ids;
 	HccStack(HccSPIRVEntryPoint)                 entry_points;
@@ -3311,6 +3323,7 @@ HccSPIRVId hcc_spirv_type_deduplicate(HccCU* cu, bool has_explicit_layout, HccDa
 HccSPIRVId hcc_spirv_decl_deduplicate(HccCU* cu, HccDecl decl);
 void hcc_spirv_resource_descriptor_binding_deduplicate(HccCU* cu, HccDataType data_type, HccSPIRVDescriptorBindingInfo* info_out);
 HccSPIRVId hcc_spirv_constant_deduplicate(HccCU* cu, HccConstantId constant_id);
+HccSPIRVId hcc_spirv_string_deduplicate(HccCU* cu, HccString string);
 uint32_t hcc_spirv_string_words_count(uint32_t string_size);
 void hcc_spirv_encode_string(HccSPIRVWord* dst_words, HccString string);
 HccSPIRVOperand* hcc_spirv_add_global_variable(HccCU* cu, uint32_t operands_count);
@@ -3319,7 +3332,7 @@ void hcc_spirv_add_member_name(HccCU* cu, uint32_t spirv_id, uint32_t member_idx
 void hcc_spirv_decorate_block_deduplicate(HccCU* cu, HccSPIRVId spirv_id);
 HccSPIRVOperand* hcc_spirv_add_decorate(HccCU* cu, uint32_t operands_count);
 HccSPIRVOperand* hcc_spirv_add_member_decorate(HccCU* cu, uint32_t operands_count);
-HccSPIRVOperand* hcc_spirv_function_add_instr(HccSPIRVFunction* function, HccSPIRVOp op, uint32_t operands_count);
+HccSPIRVOperand* hcc_spirv_function_add_instr(HccCU* cu, HccSPIRVFunction* function, HccLocation* location, HccSPIRVOp op, uint32_t operands_count);
 bool hcc_spirv_type_key_cmp(void* a, void* b, uintptr_t size);
 bool hcc_spirv_descriptor_binding_key_cmp(void* a, void* b, uintptr_t size);
 HccHash hcc_spirv_descriptor_binding_key_hash(void* key, uintptr_t size);
@@ -3359,7 +3372,7 @@ void hcc_spirvgen_deinit(HccWorker* w);
 void hcc_spirvgen_reset(HccWorker* w);
 
 HccSPIRVId hcc_spirvgen_convert_operand(HccWorker* w, HccAMLOperand aml_operand);
-HccSPIRVId hcc_spirvgen_convert_to_spirv_bool(HccWorker* w, HccSPIRVFunction* function, HccSPIRVId src_operand, HccDataType src_data_type);
+HccSPIRVId hcc_spirvgen_convert_to_spirv_bool(HccWorker* w, HccSPIRVFunction* function, HccLocation* location, HccSPIRVId src_operand, HccDataType src_data_type);
 void hcc_spirvgen_found_global(HccWorker* w, HccSPIRVId spirv_id);
 
 void hcc_spirvgen_generate(HccWorker* w);

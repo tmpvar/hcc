@@ -273,7 +273,15 @@ void hcc_spirvlink_link(HccWorker* w) {
 		}
 	}
 
-	{ // debug info
+	if (hcc_options_get_bool(w->cu->options, HCC_OPTION_KEY_DEBUG_INFO)) {
+		for (uint32_t type_idx = 0; type_idx < hcc_stack_count(cu->spirv.strings); type_idx += 1) {
+			HccSPIRVTypeOrConstant* type_or_constant = &cu->spirv.strings[type_idx];
+			operands = hcc_spirvlink_add_instr(w, type_or_constant->op, type_or_constant->operands_count);
+			for (uint32_t operand_idx = 0; operand_idx < type_or_constant->operands_count; operand_idx += 1) {
+				operands[operand_idx] = type_or_constant->operands[operand_idx];
+			}
+		}
+
 		HccSPIRVWord* words = hcc_spirvlink_add_word_many(w, hcc_stack_count(cu->spirv.name_words));
 		HCC_COPY_ELMT_MANY(words, cu->spirv.name_words, hcc_stack_count(cu->spirv.name_words));
 	}

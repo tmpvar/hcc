@@ -2885,6 +2885,7 @@ enum HccOptionKey {
 	HCC_OPTION_KEY_SPIRV_OPT,                   // bool
 	HCC_OPTION_KEY_HLSL_PACKING,                // bool
 	HCC_OPTION_KEY_UNORDERED_SWIZZLING_ENABLED, // bool
+	HCC_OPTION_KEY_DEBUG_INFO,                  // bool
 
 	HCC_OPTION_KEY_COUNT,
 };

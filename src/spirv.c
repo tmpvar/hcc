@@ -34,7 +34,9 @@ void hcc_spirv_init(HccCU* cu, HccCUSetup* setup) {
 	cu->spirv.decl_table = hcc_hash_table_init(HccSPIRVDeclEntry, HCC_ALLOC_TAG_SPIRV_DECL_TABLE, hcc_u32_key_cmp, hcc_u32_key_hash, decl_table_entries_cap);
 	cu->spirv.descriptor_binding_table = hcc_hash_table_init(HccSPIRVDescriptorBindingEntry, HCC_ALLOC_TAG_SPIRV_DESCRIPTOR_BINDING_TABLE, hcc_spirv_descriptor_binding_key_cmp, hcc_spirv_descriptor_binding_key_hash, decl_table_entries_cap);
 	cu->spirv.constant_table = hcc_hash_table_init(HccSPIRVConstantEntry, HCC_ALLOC_TAG_SPIRV_CONSTANT_TABLE, hcc_u32_key_cmp, hcc_u32_key_hash, setup->constant_table.entries_cap);
+	cu->spirv.string_table = hcc_hash_table_init(HccSPIRVStringEntry, HCC_ALLOC_TAG_SPIRV_CONSTANT_TABLE, hcc_u32_key_cmp, hcc_u32_key_hash, setup->ast.files_cap);
 	cu->spirv.types_and_constants = hcc_stack_init(HccSPIRVTypeOrConstant, HCC_ALLOC_TAG_SPIRV_TYPES_AND_CONSTANTS, types_grow_count, types_reserve_cap + setup->constant_table.entries_cap);
+	cu->spirv.strings = hcc_stack_init(HccSPIRVTypeOrConstant, HCC_ALLOC_TAG_SPIRV_TYPES_AND_CONSTANTS, 1024, setup->ast.files_cap);
 	cu->spirv.type_elmt_ids = hcc_stack_init(HccSPIRVId, HCC_ALLOC_TAG_SPIRV_TYPE_ELMT_IDS, setup->dtt.compound_fields_grow_count, setup->dtt.compound_fields_reserve_cap);
 	cu->spirv.entry_points = hcc_stack_init(HccSPIRVEntryPoint, HCC_ALLOC_TAG_SPIRV_ENTRY_POINTS, setup->functions_grow_count, setup->functions_reserve_cap);
 	cu->spirv.entry_point_global_variable_ids = hcc_stack_init(HccSPIRVId, HCC_ALLOC_TAG_SPIRV_ENTRY_POINT_GLOBAL_VARIABLE_IDS, setup->ast.global_variables_grow_count, setup->ast.global_variables_reserve_cap);
@@ -709,6 +711,38 @@ HccSPIRVId hcc_spirv_constant_deduplicate(HccCU* cu, HccConstantId constant_id) 
 	return atomic_load(&entry->spirv_id);
 }
 
+HccSPIRVId hcc_spirv_string_deduplicate(HccCU* cu, HccString string) {
+	HccStringId string_id;
+	hcc_string_table_deduplicate(string.data, string.size, &string_id);
+	HccHashTableInsert insert = hcc_hash_table_find_insert_idx(cu->spirv.string_table, &string_id);
+	HccSPIRVStringEntry* entry = &cu->spirv.string_table[insert.idx];
+	if (insert.is_new) {
+		HccSPIRVId spirv_id = hcc_spirv_next_id(cu);
+		uint32_t string_words_count = hcc_spirv_string_words_count(string.size);
+
+		HccSPIRVOp op = HCC_SPIRV_OP_STRING;
+		HccSPIRVOperand* operands = hcc_stack_push_many(cu->spirv.type_elmt_ids, 1 + string_words_count);
+		uint32_t operands_count = 1 + string_words_count;
+		operands[0] = spirv_id;
+		memcpy(&operands[1], string.data, string.size);
+
+		HccSPIRVTypeOrConstant* constant = hcc_stack_push(cu->spirv.strings);
+		constant->op = op;
+		constant->operands = operands;
+		constant->operands_count = operands_count;
+
+		atomic_store(&entry->spirv_id, spirv_id);
+	} else {
+		//
+		// spin if another thread has just inserted the entry but not set the spirv id yet
+		while (atomic_load(&entry->spirv_id) == 0) {
+			HCC_CPU_RELAX();
+		}
+	}
+
+	return atomic_load(&entry->spirv_id);
+}
+
 uint32_t hcc_spirv_string_words_count(uint32_t string_size) {
 	return (string_size + 4) / 4;
 }
@@ -775,7 +809,17 @@ HccSPIRVOperand* hcc_spirv_add_member_decorate(HccCU* cu, uint32_t operands_coun
 	return &words[1];
 }
 
-HccSPIRVOperand* hcc_spirv_function_add_instr(HccSPIRVFunction* function, HccSPIRVOp op, uint32_t operands_count) {
+HccSPIRVOperand* hcc_spirv_function_add_instr(HccCU* cu, HccSPIRVFunction* function, HccLocation* location, HccSPIRVOp op, uint32_t operands_count) {
+	if (hcc_options_get_bool(cu->options, HCC_OPTION_KEY_DEBUG_INFO) && location && (location->line_start != function->prev_line || location->column_start != function->prev_column)) {
+		HccSPIRVOperand* operands = hcc_spirv_function_add_instr(cu, function, NULL, HCC_SPIRV_OP_LINE, 3);
+		operands[0] = hcc_spirv_string_deduplicate(cu, location->code_file->path_string);
+		operands[1] = location->line_start;
+		operands[2] = location->column_start;
+
+		location->line_start = function->prev_line;
+		location->column_start = function->prev_column;
+	}
+
 	uint32_t words_count = operands_count + 1;
 	HCC_DEBUG_ASSERT_ARRAY_RESIZE(function->words_count + words_count, function->words_cap);
 	HccSPIRVWord* words = &function->words[function->words_count];

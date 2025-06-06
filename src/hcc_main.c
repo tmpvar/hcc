@@ -9,6 +9,7 @@
 #include "astlink.c"
 #include "amlgen.c"
 #include "amlopt.c"
+#include "hcc.h"
 #include "spirv.c"
 #include "spirvgen.c"
 #include "spirvlink.c"
@@ -155,6 +156,8 @@ int main(int argc, char** argv) {
 			HCC_ENSURE(hcc_task_add_output_metadata_json(task, iio));
 		} else if (strcmp(argv[arg_idx], "-O") == 0) {
 			hcc_options_set_bool(options, HCC_OPTION_KEY_SPIRV_OPT, true);
+		} else if (strcmp(argv[arg_idx], "-g") == 0) {
+			hcc_options_set_bool(options, HCC_OPTION_KEY_DEBUG_INFO, true);
 		} else if (strcmp(argv[arg_idx], "--hlsl-packing") == 0) {
 			hcc_options_set_bool(options, HCC_OPTION_KEY_HLSL_PACKING, true);
 		} else if (strcmp(argv[arg_idx], "--hlsl") == 0) {
