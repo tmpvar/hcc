@@ -34,11 +34,19 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
-// #include <sys/ulock.h>
 
 #include <fcntl.h>
 #include <pthread.h>
 #include <unistd.h>
+
+// macOS ulock primitives - these are private APIs but stable
+#define UL_COMPARE_AND_WAIT 1
+#define UL_UNFAIR_LOCK      2
+#define UL_COMPARE_AND_WAIT_SHARED 3
+#define ULF_WAKE_ALL        0x00000100
+
+extern int __ulock_wait(uint32_t operation, void *addr, uint64_t value, uint32_t timeout);
+extern int __ulock_wake(uint32_t operation, void *addr, uint64_t wake_value);
 #endif
 
 #ifdef __GNUC__
@@ -700,6 +708,14 @@ void hcc_result_print(char* what, HccResult result) {
 //
 // ===========================================
 
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
+static void* hcc_thread_start_routine_wrapper(void* arg) {
+	HccThreadSetup* setup = (HccThreadSetup*)arg;
+	setup->thread_main_fn(setup->arg);
+	return NULL;
+}
+#endif
+
 void hcc_thread_start(HccThread* thread, HccThreadSetup* setup) {
 #if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	pthread_attr_t attr;
@@ -713,7 +729,7 @@ void hcc_thread_start(HccThread* thread, HccThreadSetup* setup) {
 	}
 #endif
 
-	if ((res = pthread_create(&thread->handle, &attr, (void*(*)(void*))setup->thread_main_fn, setup->arg))) {
+	if ((res = pthread_create(&thread->handle, &attr, hcc_thread_start_routine_wrapper, setup))) {
 		hcc_bail(HCC_ERROR_THREAD_INIT, res);
 	}
 
@@ -773,9 +789,10 @@ void hcc_semaphore_set(HccSemaphore* semaphore, uint32_t value) {
 			hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, errno);
 		}
 #elif defined(HCC_OS_MACOS)
-
-			hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
-
+		int res = __ulock_wake(UL_COMPARE_AND_WAIT | ULF_WAKE_ALL, &semaphore->value, 0);
+		if (res == -1 && errno != ENOENT) {
+			hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, errno);
+		}
 #elif defined(HCC_OS_WINDOWS)
 		WakeByAddressSingle(&semaphore->value);
 #else
@@ -797,7 +814,14 @@ void hcc_semaphore_give(HccSemaphore* semaphore, uint32_t count) {
 		hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, errno);
 	}
 #elif defined(HCC_OS_MACOS)
-	hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
+	uint32_t operation = UL_COMPARE_AND_WAIT;
+	if (count > 1) {
+		operation |= ULF_WAKE_ALL;
+	}
+	int res = __ulock_wake(operation, &semaphore->value, 0);
+	if (res == -1 && errno != ENOENT) {
+		hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, errno);
+	}
 #elif defined(HCC_OS_WINDOWS)
 	if (count > 1) {
 		WakeByAddressAll(&semaphore->value);
@@ -828,19 +852,21 @@ void hcc_semaphore_take_or_wait_then_take(HccSemaphore* semaphore) {
 		}
 	}
 #elif defined(HCC_OS_MACOS)
-	uint32_t counter = atomic_load(&semaphore->value);
-	while (counter)
-	{
-		uint32_t next_counter = counter - 1;
-		if (atomic_compare_exchange_weak(&semaphore->value, &counter, next_counter))
-		{
-			goto RETURN;
+	while (1) {
+		uint32_t counter = atomic_load(&semaphore->value);
+		while (counter) {
+			uint32_t next_counter = counter - 1;
+			if (atomic_compare_exchange_weak(&semaphore->value, &counter, next_counter)) {
+				goto RETURN;
+			}
+		}
+
+		uint32_t expected_value = 0;
+		int res = __ulock_wait(UL_COMPARE_AND_WAIT, &semaphore->value, expected_value, 0);
+		if (res == -1 && errno != EAGAIN && errno != EINTR) {
+			hcc_bail(HCC_ERROR_SEMAPHORE_TAKE, errno);
 		}
 	}
-
-	// __ulock_wait()
-
-	hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
 #elif defined(HCC_OS_WINDOWS)
 	while (1) {
 		uint32_t counter = atomic_load(&semaphore->value);
@@ -930,8 +956,19 @@ void hcc_mutex_lock(HccMutex* mutex) {
 		}
 	}
 #elif defined(HCC_OS_MACOS)
-	if (mutex) {
-		hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
+	while (1) {
+		uint32_t is_locked = atomic_load(&mutex->is_locked);
+		while (!is_locked) {
+			if (atomic_compare_exchange_weak(&mutex->is_locked, &is_locked, true)) {
+				return;
+			}
+		}
+
+		uint32_t expected_value = true;
+		int res = __ulock_wait(UL_COMPARE_AND_WAIT, &mutex->is_locked, expected_value, 0);
+		if (res == -1 && errno != EAGAIN && errno != EINTR) {
+			hcc_bail(HCC_ERROR_MUTEX_LOCK, errno);
+		}
 	}
 #elif defined(HCC_OS_WINDOWS)
 	while (1) {
@@ -961,8 +998,9 @@ void hcc_mutex_unlock(HccMutex* mutex) {
 		hcc_bail(HCC_ERROR_MUTEX_UNLOCK, errno);
 	}
 #elif defined(HCC_OS_MACOS)
-	if (mutex) {
-		hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
+	int res = __ulock_wake(UL_COMPARE_AND_WAIT, &mutex->is_locked, 0);
+	if (res == -1 && errno != ENOENT) {
+		hcc_bail(HCC_ERROR_MUTEX_UNLOCK, errno);
 	}
 #elif defined(HCC_OS_WINDOWS)
 	WakeByAddressSingle(&mutex->is_locked);
@@ -1541,16 +1579,23 @@ ERR:
 		goto REMAP_ERROR;
 	}
 #else
+	// First, allocate a contiguous region to get an address
+	addr = mmap(requested_addr, size * 2, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+	if (addr == MAP_FAILED) {
+		hcc_bail(HCC_ERROR_ALLOCATION_FAILURE, tag);
+	}
+
 	shm_id = shmget(IPC_PRIVATE, size, IPC_CREAT | 0700);
 	if (shm_id < 0) goto SHMGET_ERROR;
 
+	// Unmap the reserved region so we can map shared memory there
 	munmap(addr, size * 2);
 
 	if (shmat(shm_id, addr, 0) != addr) {
 		goto SHMAT_ERROR;
 	}
 
-	if (shmat(shm_id, addr + size, 0) != (addr + size)) {
+	if (shmat(shm_id, HCC_PTR_ADD(addr, size), 0) != HCC_PTR_ADD(addr, size)) {
 		goto SHMAT2_ERROR;
 	}
 
@@ -1594,7 +1639,7 @@ void hcc_virt_mem_magic_ring_buffer_dealloc(HccAllocTag tag, void* addr, uintptr
 	if (shmdt(addr) == -1) {
 		hcc_bail(HCC_ERROR_ALLOCATION_FAILURE, tag);
 	}
-	if (shmdt(addr + size)) {
+	if (shmdt(HCC_PTR_ADD(addr, size))) {
 		hcc_bail(HCC_ERROR_ALLOCATION_FAILURE, tag);
 	}
 #endif

@@ -1,7 +1,25 @@
 #!/bin/sh
 set -euo pipefail
 set -x
-FLAGS="-pedantic -Ilibhmaths -Ilibhccintrinsics -Iinterop -D_GNU_SOURCE -std=gnu11 -Werror -Wfloat-conversion -Wimplicit-fallthrough -Wextra -g -lm -ldl -pthread -Wno-unused-parameter -Wno-gnu-pointer-arith -Wno-format"
+
+# Platform detection
+OS="$(uname -s)"
+case "${OS}" in
+	Linux*)
+		PLATFORM_FLAGS="-ldl"
+		PLATFORM_LIBS="-lX11 -lvulkan"
+		;;
+	Darwin*)
+		PLATFORM_FLAGS=""
+		PLATFORM_LIBS="-lvulkan"
+		;;
+	*)
+		echo "Unsupported platform: ${OS}"
+		exit 1
+		;;
+esac
+
+FLAGS="-pedantic -Ilibhmaths -Ilibhccintrinsics -Iinterop -D_GNU_SOURCE -std=gnu11 -Werror -Wfloat-conversion -Wimplicit-fallthrough -Wextra -g -lm ${PLATFORM_FLAGS} -pthread -Wno-unused-parameter -Wno-gnu-pointer-arith -Wno-format"
 if [ "${1-default}" = "release" ]; then
 	FLAGS="$FLAGS -O2"
 fi
@@ -15,11 +33,7 @@ ln -snf ../libhccintrinsics libhccintrinsics
 cd ..\
 
 clang $FLAGS -o build/hcc src/hcc_main.c && \
-clang -pedantic -D_GNU_SOURCE -Ilibhmaths -Ilibhccintrinsics -Iinterop -lm -std=gnu11 -Werror -Wfloat-conversion -Wextra -lX11 -lvulkan -g -o ./tests/tests ./tests/app/main.c && \
-./tests/tests && \
-build/hcc -O -g -fi samples/shaders.c -fo samples/shaders.spirv -fomc samples/shaders-metadata.h --enable-unordered-swizzling && \
-clang -pedantic -D_GNU_SOURCE -Ilibhmaths -Ilibhccintrinsics -Iinterop -lm -std=gnu11 -Werror -Wfloat-conversion -Wextra -lX11 -lvulkan -g -o ./samples/samples ./samples/app/main.c && \
-clang -pedantic -D_GNU_SOURCE -Ilibhmaths -Ilibhccintrinsics -Iinterop -lm -std=gnu11 -Werror -Wfloat-conversion -Wextra -lX11 -lvulkan -g -o ./playground/playground ./playground/app/main.c
+build/hcc -O -g -fi samples/shaders.c -fo samples/shaders.spirv -fomc samples/shaders-metadata.h --enable-unordered-swizzling
 
 EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then
