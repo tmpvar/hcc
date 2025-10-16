@@ -11,7 +11,7 @@ case "${OS}" in
 		;;
 	Darwin*)
 		PLATFORM_FLAGS=""
-		PLATFORM_LIBS="-lvulkan"
+		PLATFORM_LIBS="-framework Cocoa -framework QuartzCore -lvulkan"
 		;;
 	*)
 		echo "Unsupported platform: ${OS}"

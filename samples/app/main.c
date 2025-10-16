@@ -15,8 +15,12 @@
 #include "platform_win32.c"
 #include "dm_win32.c"
 #include "gpu_vulkan.c"
+#elif defined(__APPLE__)
+#include "platform_macos.c"
+#include "dm_cocoa.m"
+#include "gpu_vulkan.c"
 #else
-#error "unsupported platform
+#error "unsupported platform"
 #endif
 
 int main(int argc, char** argv) {

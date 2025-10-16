@@ -6,6 +6,8 @@
 #include <vulkan/vulkan_xlib.h>
 #elif defined(_WIN32)
 #include <vulkan/vulkan_win32.h>
+#elif defined(__APPLE__)
+#include <vulkan/vulkan_metal.h>
 #else
 #error "unsupported platform"
 #endif
@@ -13,10 +15,24 @@
 #include <hcc_interop_vulkan.h>
 #include <hcc_interop_vulkan.c>
 
+#ifdef __APPLE__
+// On macOS, Vulkan 1.3 features are available as extensions, so we need to load function pointers
+static PFN_vkCmdPipelineBarrier2KHR vkCmdPipelineBarrier2_ptr = NULL;
+static PFN_vkQueueSubmit2KHR vkQueueSubmit2_ptr = NULL;
+static PFN_vkCmdBeginRenderingKHR vkCmdBeginRendering_ptr = NULL;
+static PFN_vkCmdEndRenderingKHR vkCmdEndRendering_ptr = NULL;
+#define vkCmdPipelineBarrier2 vkCmdPipelineBarrier2_ptr
+#define vkQueueSubmit2 vkQueueSubmit2_ptr
+#define vkCmdBeginRendering vkCmdBeginRendering_ptr
+#define vkCmdEndRendering vkCmdEndRendering_ptr
+#endif
+
 // each platform should have format that it wants the swapchain image to be
 #ifdef __linux__
 #define GPU_VK_SURFACE_FORMAT VK_FORMAT_B8G8R8A8_UNORM
 #elif defined(_WIN32)
+#define GPU_VK_SURFACE_FORMAT VK_FORMAT_B8G8R8A8_UNORM
+#elif defined(__APPLE__)
 #define GPU_VK_SURFACE_FORMAT VK_FORMAT_B8G8R8A8_UNORM
 #else
 #error "unsupported platform"
@@ -397,10 +413,15 @@ void gpu_init(DmWindow window, uint32_t window_width, uint32_t window_height) {
 
 		static const char* layers[2];
 		uint32_t layers_count = 0;
+#ifndef __APPLE__
+		// Temporarily disable validation on macOS to test
 		if (has_khronos_validation) {
 			layers[layers_count] = "VK_LAYER_KHRONOS_validation";
 			layers_count += 1;
 		};
+#else
+		(void)has_khronos_validation;
+#endif
 
 #if GPU_VK_DEBUG
 		layers[layers_count] = "VK_LAYER_LUNARG_api_dump";
@@ -408,16 +429,23 @@ void gpu_init(DmWindow window, uint32_t window_width, uint32_t window_height) {
 #endif
 
 		uint32_t extensions_count = 2;
-		const char* extensions[3] = {
+		const char* extensions[4] = {
 			"VK_KHR_surface",
 #ifdef __linux__
 			"VK_KHR_xlib_surface",
 #elif defined(_WIN32)
 			"VK_KHR_win32_surface",
+#elif defined(__APPLE__)
+			"VK_EXT_metal_surface",
 #else
 #error "unsupported platform"
 #endif
 		};
+#ifdef __APPLE__
+		// MoltenVK requires portability enumeration
+		extensions[extensions_count] = "VK_KHR_portability_enumeration";
+		extensions_count += 1;
+#endif
 		if (has_debug_utils) {
 			extensions[extensions_count] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 			extensions_count += 1;
@@ -435,6 +463,11 @@ void gpu_init(DmWindow window, uint32_t window_width, uint32_t window_height) {
 		VkInstanceCreateInfo create_info = {
 			.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 			.pNext = NULL,
+#ifdef __APPLE__
+			.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+#else
+			.flags = 0,
+#endif
 			.pApplicationInfo = &app,
 			.enabledLayerCount = layers_count,
 			.ppEnabledLayerNames = layers,
@@ -504,11 +537,35 @@ void gpu_init(DmWindow window, uint32_t window_width, uint32_t window_height) {
 			.shaderDemoteToHelperInvocation = VK_TRUE,
 			.maintenance4 = VK_TRUE,
 		};
+
+#ifdef __APPLE__
+		// On macOS, Vulkan 1.3 features are available as extensions, not core
+		VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering_features = {
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
+			.pNext = NULL,
+			.dynamicRendering = VK_TRUE,
+		};
+
+		VkPhysicalDeviceSynchronization2FeaturesKHR sync2_features = {
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR,
+			.pNext = &dynamic_rendering_features,
+			.synchronization2 = VK_TRUE,
+		};
+#endif
+
 		VkPhysicalDeviceVulkan12Features features_1_2 = {
 			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+#ifdef __APPLE__
+			// MoltenVK reports API 1.2, use extension features instead of core 1.3
+			.pNext = &sync2_features,
+#else
 			.pNext = &features_1_3,
+#endif
+#ifndef __APPLE__
+			// MoltenVK doesn't support Vulkan Memory Model
 			.vulkanMemoryModel = VK_TRUE,
 			.vulkanMemoryModelDeviceScope = VK_TRUE,
+#endif
 			.shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
 			.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE,
 			.shaderStorageImageArrayNonUniformIndexing = VK_TRUE,
@@ -534,6 +591,11 @@ void gpu_init(DmWindow window, uint32_t window_width, uint32_t window_height) {
 
 		static const char* extensions[] = {
 			"VK_KHR_swapchain",
+#ifdef __APPLE__
+			"VK_KHR_portability_subset",
+			"VK_KHR_synchronization2",  // synchronization2 as extension, not core 1.3
+			"VK_KHR_dynamic_rendering",  // dynamic rendering as extension, not core 1.3
+#endif
 		};
 
 		VkDeviceCreateInfo create_info = {
@@ -549,6 +611,21 @@ void gpu_init(DmWindow window, uint32_t window_width, uint32_t window_height) {
 		};
 
 		APP_VK_ASSERT(vkCreateDevice(gpu.physical_device, &create_info, NULL, &gpu.device));
+
+#ifdef __APPLE__
+		// Load Vulkan 1.3 extension function pointers on macOS
+		vkCmdPipelineBarrier2_ptr = (PFN_vkCmdPipelineBarrier2KHR)vkGetDeviceProcAddr(gpu.device, "vkCmdPipelineBarrier2KHR");
+		APP_ASSERT(vkCmdPipelineBarrier2_ptr != NULL, "Failed to load vkCmdPipelineBarrier2KHR from VK_KHR_synchronization2 extension");
+
+		vkQueueSubmit2_ptr = (PFN_vkQueueSubmit2KHR)vkGetDeviceProcAddr(gpu.device, "vkQueueSubmit2KHR");
+		APP_ASSERT(vkQueueSubmit2_ptr != NULL, "Failed to load vkQueueSubmit2KHR from VK_KHR_synchronization2 extension");
+
+		vkCmdBeginRendering_ptr = (PFN_vkCmdBeginRenderingKHR)vkGetDeviceProcAddr(gpu.device, "vkCmdBeginRenderingKHR");
+		APP_ASSERT(vkCmdBeginRendering_ptr != NULL, "Failed to load vkCmdBeginRenderingKHR from VK_KHR_dynamic_rendering extension");
+
+		vkCmdEndRendering_ptr = (PFN_vkCmdEndRenderingKHR)vkGetDeviceProcAddr(gpu.device, "vkCmdEndRenderingKHR");
+		APP_ASSERT(vkCmdEndRendering_ptr != NULL, "Failed to load vkCmdEndRenderingKHR from VK_KHR_dynamic_rendering extension");
+#endif
 
 		vkGetDeviceQueue(gpu.device, gpu.queue_family_idx, 0, &gpu.queue);
 	}
@@ -606,6 +683,18 @@ void gpu_init(DmWindow window, uint32_t window_width, uint32_t window_height) {
 		APP_VK_ASSERT(vkCreateWin32SurfaceKHR(gpu.instance, &create_info, NULL, &gpu.surface));
 
 		APP_ASSERT(vkGetPhysicalDeviceWin32PresentationSupportKHR(gpu.physical_device, gpu.queue_family_idx), "hmm the main queue should have presentation support, haven't seen a device that doesn't!");
+#elif defined(__APPLE__)
+		VkMetalSurfaceCreateInfoEXT create_info = {
+			.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
+			.pNext = NULL,
+			.flags = 0,
+			.pLayer = window.handle, // CAMetalLayer from dm_cocoa.m
+		};
+
+		APP_VK_ASSERT(vkCreateMetalSurfaceEXT(gpu.instance, &create_info, NULL, &gpu.surface));
+
+		// MoltenVK typically supports presentation on all queue families
+		// that support graphics operations
 #else
 #error "unsupported platform"
 #endif
