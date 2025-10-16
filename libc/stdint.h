@@ -32,6 +32,18 @@ typedef unsigned long  uint64_t;
 typedef unsigned long  uintptr_t;
 typedef signed long    intptr_t;
 
+#elifdef __HCC_MAC_OS__
+
+typedef signed   short int16_t;
+typedef unsigned short uint16_t;
+typedef signed   int   int32_t;
+typedef unsigned int   uint32_t;
+typedef signed   long  int64_t;
+typedef unsigned long  uint64_t;
+
+typedef unsigned long  uintptr_t;
+typedef signed long    intptr_t;
+
 #elifdef __HCC_WINDOWS__
 
 typedef signed   short     int16_t;
@@ -46,6 +58,28 @@ typedef signed long   long intptr_t;
 
 #else
 #error "unsupported OS on the x86-64 host architecture"
+#endif
+
+#define INTPTR_MIN  (-9223372036854775807-1)
+#define INTPTR_MAX  9223372036854775807
+#define UINTPTR_MAX 18446744073709551615u
+
+#elifdef __HCC_AARCH64__
+
+#ifdef __HCC_MAC_OS__
+
+typedef signed   short int16_t;
+typedef unsigned short uint16_t;
+typedef signed   int   int32_t;
+typedef unsigned int   uint32_t;
+typedef signed   long  int64_t;
+typedef unsigned long  uint64_t;
+
+typedef unsigned long  uintptr_t;
+typedef signed long    intptr_t;
+
+#else
+#error "unsupported OS on the aarch64 host architecture"
 #endif
 
 #define INTPTR_MIN  (-9223372036854775807-1)

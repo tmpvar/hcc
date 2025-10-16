@@ -43,10 +43,16 @@ void hcc_ppgen_reset(HccWorker* w) {
 		if (m == HCC_PP_PREDEFINED_MACRO___HCC_LINUX__ && target_os != HCC_TARGET_OS_LINUX) {
 			continue;
 		}
+		if (m == HCC_PP_PREDEFINED_MACRO___HCC_MAC_OS__ && target_os != HCC_TARGET_OS_MAC_OS) {
+			continue;
+		}
 		if (m == HCC_PP_PREDEFINED_MACRO___HCC_WINDOWS__ && target_os != HCC_TARGET_OS_WINDOWS) {
 			continue;
 		}
 		if (m == HCC_PP_PREDEFINED_MACRO___HCC_X86_64__ && target_arch != HCC_TARGET_ARCH_X86_64) {
+			continue;
+		}
+		if (m == HCC_PP_PREDEFINED_MACRO___HCC_AARCH64__ && target_arch != HCC_TARGET_ARCH_AARCH64) {
 			continue;
 		}
 
@@ -1271,7 +1277,9 @@ void hcc_ppgen_copy_expand_predefined_macro(HccWorker* w, HccPPPredefinedMacro p
 		case HCC_PP_PREDEFINED_MACRO___HCC__:
 		case HCC_PP_PREDEFINED_MACRO___HCC_GPU__:
 		case HCC_PP_PREDEFINED_MACRO___HCC_X86_64__:
+		case HCC_PP_PREDEFINED_MACRO___HCC_AARCH64__:
 		case HCC_PP_PREDEFINED_MACRO___HCC_LINUX__:
+		case HCC_PP_PREDEFINED_MACRO___HCC_MAC_OS__:
 		case HCC_PP_PREDEFINED_MACRO___HCC_WINDOWS__:
 			return;
 	}

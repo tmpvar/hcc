@@ -93,8 +93,18 @@ HccOptionsSetup hcc_options_setup_default = {
 };
 
 HccOptionValue hcc_option_key_defaults[HCC_OPTION_KEY_COUNT] = {
+#ifdef HCC_ARCH_X86_64
 	[HCC_OPTION_KEY_TARGET_ARCH] =                  { .uint = HCC_TARGET_ARCH_X86_64 },
+#elif defined(HCC_ARCH_AARCH64)
+	[HCC_OPTION_KEY_TARGET_ARCH] =                  { .uint = HCC_TARGET_ARCH_AARCH64 },
+#endif
+#ifdef HCC_OS_LINUX
 	[HCC_OPTION_KEY_TARGET_OS] =                    { .uint = HCC_TARGET_OS_LINUX },
+#elif defined(HCC_OS_MACOS)
+	[HCC_OPTION_KEY_TARGET_OS] =                    { .uint = HCC_TARGET_OS_MAC_OS },
+#elif defined(HCC_OS_WINDOWS)
+	[HCC_OPTION_KEY_TARGET_OS] =                    { .uint = HCC_TARGET_OS_WINDOWS },
+#endif
 	[HCC_OPTION_KEY_TARGET_GFX_API] =               { .uint = HCC_TARGET_GFX_API_VULKAN },
 	[HCC_OPTION_KEY_TARGET_FORMAT] =                { .uint = HCC_TARGET_FORMAT_SPIRV },
 	[HCC_OPTION_KEY_INT8_ENABLED] =                 { .bool_ = false },
@@ -265,6 +275,8 @@ bool hcc_options_is_char_unsigned(HccOptions* o) {
 	switch (hcc_options_get_u32(o, HCC_OPTION_KEY_TARGET_ARCH)) {
 		case HCC_TARGET_ARCH_X86_64:
 			return false;
+		case HCC_TARGET_ARCH_AARCH64:
+			return true; // ARM64 char is unsigned by default
 		default: HCC_ABORT("TODO implement the signiness of the char type for this target configuration");
 	}
 }

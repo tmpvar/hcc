@@ -1397,10 +1397,18 @@ void hcc_virt_mem_reset(HccAllocTag tag, void* addr, uintptr_t size) {
 	HCC_DEBUG_ASSERT_PAGE_SIZE(addr);
 	HCC_DEBUG_ASSERT_PAGE_SIZE(size);
 
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+#if defined(HCC_OS_LINUX)
 	if (madvise(addr, size, MADV_DONTNEED) != 0) {
 		hcc_bail(HCC_ERROR_ALLOCATION_FAILURE, tag);
 	}
+#elif defined(HCC_OS_MACOS)
+	// On macOS, MADV_DONTNEED doesn't zero pages like it does on Linux.
+	// MADV_FREE tells the kernel it can reclaim pages, but doesn't guarantee zeroing.
+	// We use memset to explicitly zero the memory after advising.
+	if (madvise(addr, size, MADV_FREE) != 0) {
+		// MADV_FREE might fail, but that's okay - we'll still zero the memory
+	}
+	memset(addr, 0, size);
 #elif defined(HCC_OS_WINDOWS)
 	MEMORY_BASIC_INFORMATION mem_info;
 	if (VirtualQuery(addr, &mem_info, sizeof(mem_info)) == 0) {
@@ -2912,11 +2920,23 @@ void hcc_data_type_table_init(HccCU* cu, HccCUSetup* setup) {
 		case HCC_TARGET_ARCH_X86_64:
 			switch (hcc_options_get_u32(cu->options, HCC_OPTION_KEY_TARGET_OS)) {
 				case HCC_TARGET_OS_LINUX:
+				case HCC_TARGET_OS_MAC_OS:
 					cu->dtt.basic_type_size_and_aligns = hcc_ast_basic_type_size_and_aligns_x86_64_linux;
 					cu->dtt.basic_type_int_mins = hcc_ast_basic_type_int_mins_x86_64_linux;
 					cu->dtt.basic_type_int_maxes = hcc_ast_basic_type_int_maxes_x86_64_linux;
 					break;
 				default: HCC_ABORT("internal error: unhandled OS for the X86_64 architecture");
+			}
+			break;
+		case HCC_TARGET_ARCH_AARCH64:
+			switch (hcc_options_get_u32(cu->options, HCC_OPTION_KEY_TARGET_OS)) {
+				case HCC_TARGET_OS_MAC_OS:
+					// macOS ARM64 uses the same basic type sizes as x86_64 Linux
+					cu->dtt.basic_type_size_and_aligns = hcc_ast_basic_type_size_and_aligns_x86_64_linux;
+					cu->dtt.basic_type_int_mins = hcc_ast_basic_type_int_mins_x86_64_linux;
+					cu->dtt.basic_type_int_maxes = hcc_ast_basic_type_int_maxes_x86_64_linux;
+					break;
+				default: HCC_ABORT("internal error: unhandled OS for the AARCH64 architecture");
 			}
 			break;
 		default: HCC_ABORT("internal error: unhandled architecture");

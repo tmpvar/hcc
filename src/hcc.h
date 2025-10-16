@@ -2811,6 +2811,7 @@ HccAML* hcc_cu_get_aml(HccCU* cu);
 typedef uint16_t HccTargetArch;
 enum HccTargetArch {
 	HCC_TARGET_ARCH_X86_64,
+	HCC_TARGET_ARCH_AARCH64,
 
 	HCC_TARGET_ARCH_COUNT,
 };

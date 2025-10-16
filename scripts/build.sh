@@ -40,7 +40,7 @@ if [ $EXIT_CODE -ne 0 ]; then
 	exit $EXIT_CODE
 fi
 
-if [ "${1}" = "release" ]; then
+if [ "${1-default}" = "release" ]; then
 	echo "=========== Building Release Package ==========="
 	cd build
 	tar -cvzf "hcc-0.4.0-linux.tar.gz" hcc ../libc ../libhmaths ../libhccintrinsics ../interop ../samples ../playground ../docs ../README.md ../LICENSE

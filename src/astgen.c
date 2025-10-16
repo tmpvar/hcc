@@ -2089,7 +2089,71 @@ HccDataType hcc_astgen_generate_compound_data_type(HccWorker* w) {
 			switch (target_arch) {
 				case HCC_TARGET_ARCH_X86_64:
 					switch (target_os) {
-						case HCC_TARGET_OS_LINUX: {
+						case HCC_TARGET_OS_LINUX:
+						case HCC_TARGET_OS_MAC_OS: {
+							if (!prev_is_bitfield) {
+								byte_offset = is_union ? 0 : compound_data_type.size;
+								bit_offset = 0;
+								storage_field_bits_cap = 0;
+							}
+
+							uint32_t new_bit_offset = bit_offset + field->bits_count;
+
+							if (new_bit_offset > storage_field_bits_cap) {
+								byte_offset = is_union ? 0 : compound_data_type.size;
+								bit_offset = 0;
+							}
+
+							field->byte_offset = byte_offset;
+							field->bit_offset = bit_offset;
+
+							if (new_bit_offset > storage_field_bits_cap) {
+								new_bit_offset = field->bits_count;
+								HccCompoundField* storage_field = &compound_data_type.storage_fields[storage_field_idx];
+								storage_field_idx += 1;
+
+								byte_offset = compound_data_type.size;
+
+								HccDataType storage_field_data_type
+									= byte_offset % 8 == 0 && has_int64_support ? HCC_DATA_TYPE_AST_BASIC_ULONG
+									: byte_offset % 4 == 0                      ? HCC_DATA_TYPE_AST_BASIC_UINT
+									: byte_offset % 2 == 0 && has_int16_support ? HCC_DATA_TYPE_AST_BASIC_USHORT
+									: has_int8_support                          ? HCC_DATA_TYPE_AST_BASIC_UCHAR
+									: HCC_DATA_TYPE_AST_BASIC_UINT              ;
+
+								uint64_t storage_field_size;
+								uint64_t storage_field_align;
+								hcc_data_type_size_align(w->cu, storage_field_data_type, &storage_field_size, &storage_field_align);
+
+								*storage_field = *field;
+								storage_field->is_bitfield = true;
+								storage_field->byte_offset = byte_offset;
+								storage_field->data_type = storage_field_data_type;
+
+								storage_field_bits_cap = storage_field_size * 8;
+								if (is_union) {
+									if (compound_data_type.size < size) {
+										compound_data_type.largest_sized_field_idx = storage_field_idx - 1;
+										compound_data_type.size = size;
+									}
+									new_bit_offset = 0;
+								} else {
+									compound_data_type.size += storage_field_size;
+								}
+							}
+
+							bit_offset = new_bit_offset;
+							compound_data_type.align = HCC_MAX(compound_data_type.align, align);
+							break;
+						};
+						default:
+							HCC_ABORT("bit-fields have not been implemented for your platform!");
+					}
+					break;
+				case HCC_TARGET_ARCH_AARCH64:
+					switch (target_os) {
+						case HCC_TARGET_OS_MAC_OS: {
+							// ARM64 uses the same bit-field layout as x86_64 System V ABI
 							if (!prev_is_bitfield) {
 								byte_offset = is_union ? 0 : compound_data_type.size;
 								bit_offset = 0;
