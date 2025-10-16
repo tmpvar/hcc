@@ -48,19 +48,35 @@
 - (instancetype)initWithFrame:(NSRect)frameRect {
 	self = [super initWithFrame:frameRect];
 	if (self) {
-		self.wantsLayer = YES;
+		// Create and configure metal layer BEFORE setting wantsLayer
+		// This ensures makeBackingLayer will return our configured layer
+		CGFloat scale = [[NSScreen mainScreen] backingScaleFactor];
 		_metalLayer = [CAMetalLayer layer];
 		_metalLayer.frame = frameRect;
-		_metalLayer.contentsScale = [[NSScreen mainScreen] backingScaleFactor];
+		_metalLayer.contentsScale = scale;
+		_metalLayer.drawableSize = CGSizeMake(frameRect.size.width * scale,
+		                                       frameRect.size.height * scale);
+		_metalLayer.presentsWithTransaction = NO;
+		_metalLayer.opaque = YES;
+		// Now set wantsLayer - this will call makeBackingLayer which returns our layer
+		self.wantsLayer = YES;
 	}
 	return self;
 }
 
 - (CALayer *)makeBackingLayer {
+	// This method is called when wantsLayer is set to YES
+	// Return our pre-configured metal layer
 	if (!_metalLayer) {
+		// Fallback: if somehow called before initWithFrame completes
+		CGFloat scale = [[NSScreen mainScreen] backingScaleFactor];
 		_metalLayer = [CAMetalLayer layer];
 		_metalLayer.frame = self.bounds;
-		_metalLayer.contentsScale = [[NSScreen mainScreen] backingScaleFactor];
+		_metalLayer.contentsScale = scale;
+		_metalLayer.drawableSize = CGSizeMake(self.bounds.size.width * scale,
+		                                       self.bounds.size.height * scale);
+		_metalLayer.presentsWithTransaction = NO;
+		_metalLayer.opaque = YES;
 	}
 	return _metalLayer;
 }
@@ -69,6 +85,10 @@
 	[super setFrameSize:newSize];
 	if (_metalLayer) {
 		_metalLayer.frame = self.bounds;
+		// Update drawable size for retina displays
+		CGFloat scale = _metalLayer.contentsScale;
+		_metalLayer.drawableSize = CGSizeMake(newSize.width * scale,
+		                                       newSize.height * scale);
 	}
 }
 
