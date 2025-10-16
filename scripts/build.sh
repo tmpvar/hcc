@@ -1,7 +1,8 @@
 #!/bin/sh
-
-FLAGS="-pedantic -Ilibhmaths -Ilibhccintrinsics -Iinterop -D_GNU_SOURCE -std=gnu11 -Werror -Wfloat-conversion -Wimplicit-fallthrough -Wextra -Wno-cast-function-type-mismatch -g -lm -ldl -pthread"
-if [ "${1}" = "release" ]; then
+set -euo pipefail
+set -x
+FLAGS="-pedantic -Ilibhmaths -Ilibhccintrinsics -Iinterop -D_GNU_SOURCE -std=gnu11 -Werror -Wfloat-conversion -Wimplicit-fallthrough -Wextra -g -lm -ldl -pthread -Wno-unused-parameter -Wno-gnu-pointer-arith -Wno-format"
+if [ "${1-default}" = "release" ]; then
 	FLAGS="$FLAGS -O2"
 fi
 

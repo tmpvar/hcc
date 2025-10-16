@@ -22,6 +22,13 @@
 #define HCC_OS_WINDOWS
 #endif
 
+#ifdef __APPLE__
+#define HCC_OS_MACOS
+#ifndef PATH_MAX
+#define PATH_MAX 512
+#endif
+#endif
+
 #if _WIN32 || _WIN64
 #if _WIN64
 #define HCC_ARCH_X86_64

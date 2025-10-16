@@ -49,27 +49,35 @@ typedef struct HccWorker HccWorker;
 #define HCC_LITTLE_ENDIAN 0
 #define HCC_BIG_ENDIAN    1
 #ifdef HCC_OS_LINUX
+	#ifdef HCC_ARCH_X86_64
+	#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
+	#elif defined(HCC_ARCH_AARCH64)
+	#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
+	#else
+	#error "unsupported platform"
+	#endif
 
-#ifdef HCC_ARCH_X86_64
-#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
-#elif defined(HCC_ARCH_AARCH64)
-#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
-#else
-#error "unsupported platform"
-#endif
+#elif defined(HCC_OS_MACOS)
+	#ifdef HCC_ARCH_X86_64
+	#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
+	#elif defined(HCC_ARCH_AARCH64)
+	#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
+	#else
+	#error "unsupported platform"
+	#endif
 
 #elif defined(HCC_OS_WINDOWS)
 
-#ifdef HCC_ARCH_X86_64
-#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
-#elif defined(HCC_ARCH_AARCH64)
-#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
-#else
-#error "unsupported platform"
+	#ifdef HCC_ARCH_X86_64
+		#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
+	#elif defined(HCC_ARCH_AARCH64)
+		#define HCC_BYTE_ORDER HCC_LITTLE_ENDIAN
+	#else
+		#error "unsupported platform"
+	#endif
 
-#endif
 #else
-#error "unsupported platform"
+	#error "unsupported platform"
 #endif
 
 #define HCC_STRINGIFY(v) #v
@@ -338,6 +346,8 @@ struct HccResultData {
 typedef struct HccThread HccThread;
 struct HccThread {
 #ifdef HCC_OS_LINUX
+	pthread_t handle;
+#elif defined(HCC_OS_MACOS)
 	pthread_t handle;
 #elif defined(HCC_OS_WINDOWS)
 	HANDLE handle;

@@ -26,6 +26,21 @@
 #include <unistd.h>
 #endif
 
+#ifdef HCC_OS_MACOS
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/shm.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
+// #include <sys/ulock.h>
+
+#include <fcntl.h>
+#include <pthread.h>
+#include <unistd.h>
+#endif
+
 #ifdef __GNUC__
 #include <execinfo.h>
 #endif
@@ -175,6 +190,22 @@ void hcc_get_last_system_error_string(char* buf_out, uint32_t buf_out_size) {
 		error = GetLastError();
 		HCC_ABORT("TODO handle error code: %u", error);
 	}
+#elif defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+	int error = errno;
+	// use the XSI standard behavior.
+	int res = strerror_r(error, buf_out, buf_out_size);
+	if (res != 0) {
+		int errnum = res;
+		if (res == -1)
+			errnum = errno;
+
+		if (errnum == EINVAL) {
+			goto ERROR_1;
+		} else if (errnum == ERANGE) {
+			goto ERROR_2;
+		}
+		HCC_ABORT("unexpected errno: %u", errnum);
+	}
 #elif _GNU_SOURCE
 	int error = errno;
 	// GNU version (screw these guys for changing the way this works)
@@ -192,22 +223,6 @@ void hcc_get_last_system_error_string(char* buf_out, uint32_t buf_out_size) {
 			goto ERROR_2;
 		}
 	}
-#elif defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
-	int error = errno;
-	// use the XSI standard behavior.
-	int res = strerror_r(error, buf_out, buf_out_size);
-	if (res != 0) {
-		int errnum = res;
-		if (res == -1)
-			errnum = errno;
-
-		if (errnum == EINVAL) {
-			goto ERROR_1;
-		} else if (errnum == ERANGE) {
-			goto ERROR_2;
-		}
-		HCC_ABORT("unexpected errno: %u", errnum);
-	}
 #else
 #error "unimplemented for this platform"
 #endif
@@ -221,6 +236,11 @@ ERROR_2:
 
 uint32_t hcc_path_canonicalize_internal(const char* path, char* out_buf) {
 #ifdef HCC_OS_LINUX
+	if (realpath(path, out_buf) == NULL) {
+		return 0;
+	}
+	return strlen(out_buf);
+#elif defined(HCC_OS_MACOS)
 	if (realpath(path, out_buf) == NULL) {
 		return 0;
 	}
@@ -246,7 +266,9 @@ HccString hcc_path_canonicalize(const char* path) {
 }
 
 bool hcc_path_is_absolute(const char* path) {
-#ifdef __unix__
+#ifdef __unix__ 
+	return path[0] == '/';
+#elif defined(__APPLE__) 
 	return path[0] == '/';
 #elif defined(HCC_OS_WINDOWS)
 	return path[1] == '\\' && path[2] == ':';
@@ -257,7 +279,7 @@ bool hcc_path_is_absolute(const char* path) {
 
 char* hcc_file_read_all_the_codes(const char* path, uint64_t* size_out) {
 #define _HCC_TOKENIZER_LOOK_HEAD_SIZE 4
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	int fd_flags = O_CLOEXEC | O_RDONLY;
 	int mode = 0666;
 	int fd = open(path, fd_flags, mode);
@@ -317,7 +339,6 @@ char* hcc_file_read_all_the_codes(const char* path, uint64_t* size_out) {
 	CloseHandle(handle);
 	return bytes;
 #else
-#error "unimplemented for this platform"
 #endif
 }
 
@@ -405,7 +426,7 @@ bool hcc_path_is_relative(const char* path) {
 }
 
 bool hcc_path_exists(const char* path) {
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	return access(path, F_OK) == 0;
 #elif defined(HCC_OS_WINDOWS)
 	return PathFileExistsA(path);
@@ -415,7 +436,7 @@ bool hcc_path_exists(const char* path) {
 }
 
 bool hcc_path_is_file(const char* path) {
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	struct stat s;
 	if (stat(path, &s) != 0) {
 		return false;
@@ -430,7 +451,7 @@ bool hcc_path_is_file(const char* path) {
 }
 
 bool hcc_path_is_directory(const char* path) {
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	struct stat s;
 	if (stat(path, &s) != 0) {
 		return false;
@@ -445,7 +466,7 @@ bool hcc_path_is_directory(const char* path) {
 }
 
 bool hcc_make_directory(const char* path) {
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	if (mkdir(path, 0777) != 0) {
 		return false;
 	}
@@ -481,6 +502,11 @@ HccString hcc_path_replace_file_name(HccString parent, HccString file_name) {
 uint32_t hcc_logical_cores_count(void) {
 #ifdef HCC_OS_LINUX
 	return get_nprocs();
+#elif defined(HCC_OS_MACOS)
+	int count;
+	size_t count_len = sizeof(count);
+	sysctlbyname("hw.logicalcpu", &count, &count_len, NULL, 0);
+	return count;
 #elif defined(HCC_OS_WINDOWS)
 	SYSTEM_INFO info;
 	GetSystemInfo(&info);
@@ -675,7 +701,7 @@ void hcc_result_print(char* what, HccResult result) {
 // ===========================================
 
 void hcc_thread_start(HccThread* thread, HccThreadSetup* setup) {
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	pthread_attr_t attr;
 	int res;
 	if ((res = pthread_attr_init(&attr))) {
@@ -713,7 +739,7 @@ void hcc_thread_start(HccThread* thread, HccThreadSetup* setup) {
 }
 
 void hcc_thread_wait_for_termination(HccThread* thread) {
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	int res;
 	if ((res = pthread_join(thread->handle, NULL))) {
 		hcc_bail(HCC_ERROR_THREAD_WAIT_FOR_TERMINATION, res);
@@ -746,6 +772,10 @@ void hcc_semaphore_set(HccSemaphore* semaphore, uint32_t value) {
 		if (res == -1) {
 			hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, errno);
 		}
+#elif defined(HCC_OS_MACOS)
+
+			hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
+
 #elif defined(HCC_OS_WINDOWS)
 		WakeByAddressSingle(&semaphore->value);
 #else
@@ -766,6 +796,8 @@ void hcc_semaphore_give(HccSemaphore* semaphore, uint32_t count) {
 	if (res == -1) {
 		hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, errno);
 	}
+#elif defined(HCC_OS_MACOS)
+	hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
 #elif defined(HCC_OS_WINDOWS)
 	if (count > 1) {
 		WakeByAddressAll(&semaphore->value);
@@ -779,7 +811,7 @@ void hcc_semaphore_give(HccSemaphore* semaphore, uint32_t count) {
 
 void hcc_semaphore_take_or_wait_then_take(HccSemaphore* semaphore) {
 	atomic_fetch_add(&semaphore->waiters_count, 1);
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX)
 	while (1) {
 		uint32_t counter = atomic_load(&semaphore->value);
 		while (counter) {
@@ -795,6 +827,20 @@ void hcc_semaphore_take_or_wait_then_take(HccSemaphore* semaphore) {
 			hcc_bail(HCC_ERROR_SEMAPHORE_TAKE, errno);
 		}
 	}
+#elif defined(HCC_OS_MACOS)
+	uint32_t counter = atomic_load(&semaphore->value);
+	while (counter)
+	{
+		uint32_t next_counter = counter - 1;
+		if (atomic_compare_exchange_weak(&semaphore->value, &counter, next_counter))
+		{
+			goto RETURN;
+		}
+	}
+
+	// __ulock_wait()
+
+	hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
 #elif defined(HCC_OS_WINDOWS)
 	while (1) {
 		uint32_t counter = atomic_load(&semaphore->value);
@@ -883,6 +929,10 @@ void hcc_mutex_lock(HccMutex* mutex) {
 			hcc_bail(HCC_ERROR_MUTEX_LOCK, errno);
 		}
 	}
+#elif defined(HCC_OS_MACOS)
+	if (mutex) {
+		hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
+	}
 #elif defined(HCC_OS_WINDOWS)
 	while (1) {
 		uint32_t is_locked = atomic_load(&mutex->is_locked);
@@ -909,6 +959,10 @@ void hcc_mutex_unlock(HccMutex* mutex) {
 	long res = syscall(SYS_futex, &mutex->is_locked, FUTEX_WAKE, wake_count, NULL, NULL, 0);
 	if (res == -1) {
 		hcc_bail(HCC_ERROR_MUTEX_UNLOCK, errno);
+	}
+#elif defined(HCC_OS_MACOS)
+	if (mutex) {
+		hcc_bail(HCC_ERROR_SEMAPHORE_GIVE, -1337);
 	}
 #elif defined(HCC_OS_WINDOWS)
 	WakeByAddressSingle(&mutex->is_locked);
@@ -1127,6 +1181,12 @@ void hcc_virt_mem_update_page_size_reserve_align(void) {
 
 	_hcc_gs.virt_mem_page_size = page_size;
 	_hcc_gs.virt_mem_reserve_align = page_size;
+#elif defined(HCC_OS_MACOS)
+	long page_size = getpagesize();
+	HCC_ASSERT(page_size != (long)-1, "error: we failed to get the page size");
+
+	_hcc_gs.virt_mem_page_size = page_size;
+	_hcc_gs.virt_mem_reserve_align = page_size;
 #elif defined(HCC_OS_WINDOWS)
 	SYSTEM_INFO si;
 	GetNativeSystemInfo(&si);
@@ -1279,7 +1339,7 @@ void hcc_virt_mem_release(HccAllocTag tag, void* addr, uintptr_t size) {
 #endif
 	hcc_mem_tracker_update(HCC_ALLOC_MODE_DEALLOC, tag, addr, size);
 
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	if (munmap(addr, size) != 0) {
 		hcc_bail(HCC_ERROR_ALLOCATION_FAILURE, tag);
 	}
@@ -1572,6 +1632,16 @@ HccTime hcc_time_now(HccTimeMode mode) {
 	struct timespec start;
 	clock_gettime(m, &start);
 	return (HccTime) { .secs = start.tv_sec, .nanosecs = start.tv_nsec };
+#elif defined(HCC_OS_MACOS)
+	int m;
+	switch (mode) {
+		case HCC_TIME_MODE_REALTIME: m = CLOCK_REALTIME; break;
+		case HCC_TIME_MODE_MONOTONIC: m = CLOCK_MONOTONIC; break;
+	}
+
+	struct timespec start;
+	clock_gettime(m, &start);
+	return (HccTime) { .secs = start.tv_sec, .nanosecs = start.tv_nsec };
 #elif defined(HCC_OS_WINDOWS)
 	HCC_UNUSED(mode); //TODO
 	uint64_t wintime;
@@ -1579,7 +1649,7 @@ HccTime hcc_time_now(HccTimeMode mode) {
 	wintime -= 116444736000000000ll;  //1jan1601 to 1jan1970
 	return (HccTime) { .secs = wintime / 10000000ll, .nanosecs = wintime % 10000000ll * 100 };
 #else
-#error "TODO implement virtual memory for this platform"
+#error "TODO implement hcc_time_now for this platform"
 #endif
 }
 
