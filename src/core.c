@@ -49,7 +49,7 @@ extern int __ulock_wait(uint32_t operation, void *addr, uint64_t value, uint32_t
 extern int __ulock_wake(uint32_t operation, void *addr, uint64_t wake_value);
 #endif
 
-#ifdef __GNUC__
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 #include <execinfo.h>
 #endif
 
@@ -198,23 +198,7 @@ void hcc_get_last_system_error_string(char* buf_out, uint32_t buf_out_size) {
 		error = GetLastError();
 		HCC_ABORT("TODO handle error code: %u", error);
 	}
-#elif defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
-	int error = errno;
-	// use the XSI standard behavior.
-	int res = strerror_r(error, buf_out, buf_out_size);
-	if (res != 0) {
-		int errnum = res;
-		if (res == -1)
-			errnum = errno;
-
-		if (errnum == EINVAL) {
-			goto ERROR_1;
-		} else if (errnum == ERANGE) {
-			goto ERROR_2;
-		}
-		HCC_ABORT("unexpected errno: %u", errnum);
-	}
-#elif _GNU_SOURCE
+#elif defined(HCC_OS_LINUX)
 	int error = errno;
 	// GNU version (screw these guys for changing the way this works)
 	char* buf = strerror_r(error, buf_out, buf_out_size);
@@ -230,6 +214,22 @@ void hcc_get_last_system_error_string(char* buf_out, uint32_t buf_out_size) {
 		if (size < buf_out_size) {
 			goto ERROR_2;
 		}
+	}
+#elif defined(HCC_OS_MACOS)
+	int error = errno;
+	// use the XSI standard behavior.
+	int res = strerror_r(error, buf_out, buf_out_size);
+	if (res != 0) {
+		int errnum = res;
+		if (res == -1)
+			errnum = errno;
+
+		if (errnum == EINVAL) {
+			goto ERROR_1;
+		} else if (errnum == ERANGE) {
+			goto ERROR_2;
+		}
+		HCC_ABORT("unexpected errno: %u", errnum);
 	}
 #else
 #error "unimplemented for this platform"
@@ -274,9 +274,7 @@ HccString hcc_path_canonicalize(const char* path) {
 }
 
 bool hcc_path_is_absolute(const char* path) {
-#ifdef __unix__ 
-	return path[0] == '/';
-#elif defined(__APPLE__) 
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	return path[0] == '/';
 #elif defined(HCC_OS_WINDOWS)
 	return path[1] == '\\' && path[2] == ':';
@@ -354,7 +352,7 @@ void hcc_stacktrace(uint32_t ignore_levels_count, char* buf, uint32_t buf_size) 
 	uint32_t buf_idx;
 
 #define STACKTRACE_LEVELS_MAX 128
-#if defined(__GNUC__)
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	void* stacktrace_levels[STACKTRACE_LEVELS_MAX];
 	int stacktrace_levels_count = backtrace(stacktrace_levels, STACKTRACE_LEVELS_MAX);
 
@@ -1182,7 +1180,7 @@ void hcc_arena_alctor_reset(HccArenaAlctor* alctor) {
 //
 // ===========================================
 //
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 static int _hcc_virt_mem_prot_unix(HccVirtMemProtection prot) {
 	switch (prot) {
 		case HCC_VIRT_MEM_PROTECTION_NO_ACCESS: return 0;
@@ -1242,7 +1240,7 @@ void hcc_virt_mem_reserve_commit(HccAllocTag tag, void* requested_addr, uintptr_
 	HCC_DEBUG_ASSERT_RESERVE_ALIGN_OR_ZERO(requested_addr);
 	HCC_DEBUG_ASSERT_RESERVE_ALIGN(size);
 
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	int prot = _hcc_virt_mem_prot_unix(protection);
 
 	// MAP_ANON = means map physical memory and not a file. it also means the memory will be initialized to zero
@@ -1270,7 +1268,7 @@ void hcc_virt_mem_reserve(HccAllocTag tag, void* requested_addr, uintptr_t size,
 	HCC_DEBUG_ASSERT_RESERVE_ALIGN_OR_ZERO(requested_addr);
 	HCC_DEBUG_ASSERT_RESERVE_ALIGN(size);
 
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	// memory is automatically commited on Unix based OSs,
 	// so we will restrict the memory from being accessed on reserved.
 	int prot = 0;
@@ -1299,7 +1297,7 @@ void hcc_virt_mem_commit(HccAllocTag tag, void* addr, uintptr_t size, HccVirtMem
 	HCC_DEBUG_ASSERT_PAGE_SIZE(addr);
 	HCC_DEBUG_ASSERT_PAGE_SIZE(size);
 
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	// memory is automatically commited on Unix based OSs,
 	// memory is restricted from being accessed in our hcc_virt_mem_reserve.
 	// so lets just apply the protection for the address space.
@@ -1323,7 +1321,7 @@ void hcc_virt_mem_protection_set(HccAllocTag tag, void* addr, uintptr_t size, Hc
 	HCC_DEBUG_ASSERT_PAGE_SIZE(addr);
 	HCC_DEBUG_ASSERT_PAGE_SIZE(size);
 
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	int prot = _hcc_virt_mem_prot_unix(protection);
 	if (mprotect(addr, size, prot) != 0) {
 		hcc_bail(HCC_ERROR_ALLOCATION_FAILURE, tag);
@@ -1343,7 +1341,7 @@ void hcc_virt_mem_decommit(HccAllocTag tag, void* addr, uintptr_t size) {
 	HCC_DEBUG_ASSERT_PAGE_SIZE(addr);
 	HCC_DEBUG_ASSERT_PAGE_SIZE(size);
 
-#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 
 	//
 	// advise the OS that these pages will not be needed.

@@ -8,10 +8,12 @@ case "${OS}" in
 	Linux*)
 		PLATFORM_FLAGS="-ldl"
 		PLATFORM_LIBS="-lX11 -lvulkan"
+		PLATFORM_DEFINES="-D_GNU_SOURCE"
 		;;
 	Darwin*)
 		PLATFORM_FLAGS=""
 		PLATFORM_LIBS="-framework Cocoa -framework QuartzCore -lvulkan"
+		PLATFORM_DEFINES=""
 		;;
 	*)
 		echo "Unsupported platform: ${OS}"
@@ -19,7 +21,7 @@ case "${OS}" in
 		;;
 esac
 
-FLAGS="-pedantic -Ilibhmaths -Ilibhccintrinsics -Iinterop -D_GNU_SOURCE -std=gnu11 -Werror -Wfloat-conversion -Wimplicit-fallthrough -Wextra -g -lm ${PLATFORM_FLAGS} -pthread -Wno-unused-parameter -Wno-gnu-pointer-arith -Wno-format"
+FLAGS="-pedantic -Ilibhmaths -Ilibhccintrinsics -Iinterop ${PLATFORM_DEFINES} -std=gnu11 -Werror -Wfloat-conversion -Wimplicit-fallthrough -Wextra -g -lm ${PLATFORM_FLAGS} -pthread -Wno-unused-parameter -Wno-gnu-pointer-arith -Wno-format"
 if [ "${1-default}" = "release" ]; then
 	FLAGS="$FLAGS -O2"
 fi
