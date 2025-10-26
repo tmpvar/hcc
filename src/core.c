@@ -708,14 +708,18 @@ void hcc_result_print(char* what, HccResult result) {
 
 #if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 static void* hcc_thread_start_routine_wrapper(void* arg) {
-	HccThreadSetup* setup = (HccThreadSetup*)arg;
-	setup->thread_main_fn(setup->arg);
+	HccThread* thread = (HccThread*)arg;
+	thread->thread_main_fn(thread->arg);
 	return NULL;
 }
 #endif
 
 void hcc_thread_start(HccThread* thread, HccThreadSetup* setup) {
 #if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
+	// Store setup in thread structure so it persists after this function returns
+	thread->thread_main_fn = setup->thread_main_fn;
+	thread->arg = setup->arg;
+
 	pthread_attr_t attr;
 	int res;
 	if ((res = pthread_attr_init(&attr))) {
@@ -727,7 +731,7 @@ void hcc_thread_start(HccThread* thread, HccThreadSetup* setup) {
 	}
 #endif
 
-	if ((res = pthread_create(&thread->handle, &attr, hcc_thread_start_routine_wrapper, setup))) {
+	if ((res = pthread_create(&thread->handle, &attr, hcc_thread_start_routine_wrapper, thread))) {
 		hcc_bail(HCC_ERROR_THREAD_INIT, res);
 	}
 

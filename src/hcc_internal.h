@@ -343,18 +343,18 @@ struct HccResultData {
 //
 // ===========================================
 
+typedef void (*HccThreadMainFn)(void* arg);
+
 typedef struct HccThread HccThread;
 struct HccThread {
-#ifdef HCC_OS_LINUX
+#if defined(HCC_OS_LINUX) || defined(HCC_OS_MACOS)
 	pthread_t handle;
-#elif defined(HCC_OS_MACOS)
-	pthread_t handle;
+	HccThreadMainFn thread_main_fn;
+	void* arg;
 #elif defined(HCC_OS_WINDOWS)
 	HANDLE handle;
 #endif
 };
-
-typedef void (*HccThreadMainFn)(void* arg);
 
 typedef struct HccThreadSetup HccThreadSetup;
 struct HccThreadSetup {
